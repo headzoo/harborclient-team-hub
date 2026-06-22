@@ -5,6 +5,8 @@ import type { ServerConfig } from '#/config/serverConfig.js';
 import { loadServerConfig } from '#/config/serverConfig.js';
 import { createDatabase, type IDatabase } from '#/db/index.js';
 import { createServer } from '#/index.js';
+import { createThrottleStore } from '#/server/auth/throttle/createThrottleStore.js';
+import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
 
 export interface StartCommandOptions {
   /**
@@ -28,6 +30,11 @@ export interface RunServerOptions {
    * Database instance to connect before listen and disconnect on shutdown.
    */
   db: IDatabase;
+
+  /**
+   * Throttle store to connect before listen and disconnect on shutdown.
+   */
+  throttleStore: IThrottleStore;
 }
 
 /**
@@ -58,8 +65,13 @@ function formatListenAddress(address: string | null, port: number): string {
  *
  * @param app - Running Fastify server to shut down on signal.
  * @param db - Database to disconnect during shutdown.
+ * @param throttleStore - Throttle store to disconnect during shutdown.
  */
-function registerGracefulShutdown(app: FastifyInstance, db: IDatabase): void {
+function registerGracefulShutdown(
+  app: FastifyInstance,
+  db: IDatabase,
+  throttleStore: IThrottleStore
+): void {
   /**
    * Closes the server and exits the process after a termination signal.
    *
@@ -69,6 +81,7 @@ function registerGracefulShutdown(app: FastifyInstance, db: IDatabase): void {
     app.log.info(`Received ${signal}, shutting down.`);
     await app.close();
     await db.disconnect();
+    await throttleStore.disconnect();
     process.exit(0);
   };
 
@@ -98,9 +111,14 @@ export async function runServer(
   config: ServerConfig,
   options: RunServerOptions
 ): Promise<FastifyInstance> {
-  const app = await createServer(config, { verbose: options.verbose, db: options.db });
+  const app = await createServer(config, {
+    verbose: options.verbose,
+    db: options.db,
+    throttleStore: options.throttleStore
+  });
 
   await options.db.connect();
+  await options.throttleStore.connect();
 
   await app.listen({
     host: config.host,
@@ -117,7 +135,7 @@ export async function runServer(
 
   console.log(`HarborClient server listening on ${formatListenAddress(host, port)}`);
 
-  registerGracefulShutdown(app, options.db);
+  registerGracefulShutdown(app, options.db, options.throttleStore);
 
   return app;
 }
@@ -130,7 +148,8 @@ export async function runServer(
 export async function startCommand(options: StartCommandOptions): Promise<void> {
   const config = loadServerConfig(options.config);
   const db = createDatabase(config.db);
-  await runServer(config, { verbose: options.verbose, db });
+  const throttleStore = createThrottleStore(config.redis);
+  await runServer(config, { verbose: options.verbose, db, throttleStore });
 }
 
 /**

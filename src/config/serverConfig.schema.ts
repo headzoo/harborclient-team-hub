@@ -39,11 +39,50 @@ export const dbSectionSchema = z
   .loose();
 
 /**
+ * Zod schema for the `redis` section of the config file.
+ *
+ * Throttle policy fields default to 10 failures / 900s window / 900s block when omitted.
+ */
+export const redisSectionSchema = z
+  .object({
+    host: z.string().trim().min(1, { message: 'Redis host must not be empty.' }),
+    port: portSchema,
+    password: z.string().optional(),
+    db: z
+      .union([
+        z.number().int().min(0).max(15),
+        z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(0).max(15))
+      ])
+      .optional(),
+    keyPrefix: z.string().optional(),
+    maxFailures: z
+      .union([
+        z.number().int().min(1),
+        z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1))
+      ])
+      .optional(),
+    windowSeconds: z
+      .union([
+        z.number().int().min(1),
+        z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1))
+      ])
+      .optional(),
+    blockSeconds: z
+      .union([
+        z.number().int().min(1),
+        z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1))
+      ])
+      .optional()
+  })
+  .loose();
+
+/**
  * Zod schema for the full server config document (`server.yaml` root mapping).
  */
 export const serverConfigDocumentSchema = z.object({
   server: serverSectionSchema,
-  db: dbSectionSchema
+  db: dbSectionSchema,
+  redis: redisSectionSchema
 });
 
 /**

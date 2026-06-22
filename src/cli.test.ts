@@ -4,9 +4,10 @@ import path from 'node:path';
 import { CommanderError } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createServerMock, createDatabaseMock } = vi.hoisted(() => ({
+const { createServerMock, createDatabaseMock, createThrottleStoreMock } = vi.hoisted(() => ({
   createServerMock: vi.fn(),
-  createDatabaseMock: vi.fn()
+  createDatabaseMock: vi.fn(),
+  createThrottleStoreMock: vi.fn()
 }));
 
 vi.mock('#/index.js', () => ({
@@ -21,6 +22,10 @@ vi.mock('#/db/index.js', async (importOriginal) => {
   };
 });
 
+vi.mock('#/server/auth/throttle/createThrottleStore.js', () => ({
+  createThrottleStore: createThrottleStoreMock
+}));
+
 import { createProgram } from '#/cli/program.js';
 import { migrateCommand } from '#/cli/migrateCommand.js';
 import {
@@ -33,6 +38,8 @@ import {
 import { ConfigError, loadServerConfig } from '#/config/serverConfig.js';
 import type { IDatabase } from '#/db/index.js';
 import { createStubDatabase } from '#/db/stubDatabase.js';
+import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
+import { createStubThrottleStore } from '#/server/auth/throttle/stubThrottleStore.js';
 import { startCommand, runServer } from '#/server.js';
 
 /**
@@ -82,6 +89,18 @@ function createMockDatabase(): IDatabase {
   db.revokeApiToken.mockResolvedValue(false);
   db.touchApiTokenLastUsed.mockResolvedValue(undefined);
   return db;
+}
+
+/**
+ * Builds a minimal throttle store mock for runServer tests.
+ *
+ * @returns Mock throttle store with spied connect and disconnect methods.
+ */
+function createMockThrottleStore(): IThrottleStore {
+  const throttleStore = createStubThrottleStore();
+  throttleStore.connect.mockResolvedValue(undefined);
+  throttleStore.disconnect.mockResolvedValue(undefined);
+  return throttleStore;
 }
 
 /**
@@ -143,9 +162,20 @@ const sampleDbSection = `db:
   database: harbor
 `;
 
+const sampleRedisSection = `redis:
+  host: 127.0.0.1
+  port: 6380
+`;
+
+const sampleRedisConfig = {
+  host: '127.0.0.1',
+  port: 6380
+};
+
 beforeEach(() => {
   createServerMock.mockReset();
   createDatabaseMock.mockReturnValue(createMockDatabase());
+  createThrottleStoreMock.mockReturnValue(createMockThrottleStore());
 });
 
 describe('createProgram', () => {
@@ -194,7 +224,7 @@ describe('createProgram', () => {
     const configPath = writeConfig(`server:
   port: 8787
   host: 0.0.0.0
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     const startHandler = vi.fn().mockResolvedValue(undefined);
     const program = createTestProgram({ startCommand: startHandler });
 
@@ -214,10 +244,12 @@ ${sampleDbSection}`);
     const configPath = writeConfig(`server:
   port: 8787
   host: 0.0.0.0
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     createServerMock.mockResolvedValue(createMockApp({ address: '0.0.0.0', port: 8787 }));
     const db = createMockDatabase();
+    const throttleStore = createMockThrottleStore();
     createDatabaseMock.mockReturnValue(db);
+    createThrottleStoreMock.mockReturnValue(throttleStore);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await startCommand({ config: configPath, verbose: true });
@@ -232,7 +264,8 @@ ${sampleDbSection}`);
         user: 'harbor',
         password: 'harbor',
         database: 'harbor'
-      }
+      },
+      redis: sampleRedisConfig
     });
     expect(createServerMock).toHaveBeenCalledWith(
       {
@@ -245,9 +278,10 @@ ${sampleDbSection}`);
           user: 'harbor',
           password: 'harbor',
           database: 'harbor'
-        }
+        },
+        redis: sampleRedisConfig
       },
-      { verbose: true, db }
+      { verbose: true, db, throttleStore }
     );
     expect(log).toHaveBeenCalledWith('Starting server with config:', {
       port: 8787,
@@ -259,7 +293,8 @@ ${sampleDbSection}`);
         user: 'harbor',
         password: 'harbor',
         database: 'harbor'
-      }
+      },
+      redis: sampleRedisConfig
     });
 
     log.mockRestore();
@@ -274,6 +309,7 @@ describe('runServer', () => {
   it('connects to the database and logs the listening address', async () => {
     const app = createMockApp();
     const db = createMockDatabase();
+    const throttleStore = createMockThrottleStore();
     createServerMock.mockResolvedValue(app);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
@@ -288,9 +324,10 @@ describe('runServer', () => {
           user: 'harbor',
           password: 'harbor',
           database: 'harbor'
-        }
+        },
+        redis: sampleRedisConfig
       },
-      { db }
+      { db, throttleStore }
     );
 
     expect(createServerMock).toHaveBeenCalledWith(
@@ -304,11 +341,13 @@ describe('runServer', () => {
           user: 'harbor',
           password: 'harbor',
           database: 'harbor'
-        }
+        },
+        redis: sampleRedisConfig
       },
-      { db }
+      { verbose: undefined, db, throttleStore }
     );
     expect(db.connect).toHaveBeenCalledOnce();
+    expect(throttleStore.connect).toHaveBeenCalledOnce();
     expect(app.listen).toHaveBeenCalledWith({ host: '127.0.0.1', port: 8787 });
     expect(log).toHaveBeenCalledWith('HarborClient server listening on http://127.0.0.1:8787');
 
@@ -321,7 +360,7 @@ describe('migrateCommand', () => {
     const configPath = writeConfig(`server:
   port: 8787
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     const db = createMockDatabase();
     createDatabaseMock.mockReturnValue(db);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -342,7 +381,7 @@ describe('user commands', () => {
     const configPath = writeConfig(`server:
   port: 8787
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     const db = createMockDatabase();
     createDatabaseMock.mockReturnValue(db);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -367,7 +406,7 @@ ${sampleDbSection}`);
     const configPath = writeConfig(`server:
   port: 8787
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     const db = createMockDatabase();
     createDatabaseMock.mockReturnValue(db);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -387,7 +426,7 @@ ${sampleDbSection}`);
     const configPath = writeConfig(`server:
   port: 8787
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     const db = createMockDatabase();
     db.listUsers = vi.fn().mockResolvedValue([
       {
@@ -415,7 +454,7 @@ ${sampleDbSection}`);
     const configPath = writeConfig(`server:
   port: 8787
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     const db = createMockDatabase();
     db.listApiTokens = vi.fn().mockResolvedValue([
       {
@@ -444,7 +483,7 @@ ${sampleDbSection}`);
     const configPath = writeConfig(`server:
   port: 8787
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
     const db = createMockDatabase();
     db.revokeApiToken = vi.fn().mockResolvedValue(true);
     createDatabaseMock.mockReturnValue(db);

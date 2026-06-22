@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createStubDatabase } from '#/db/stubDatabase.js';
 import { createServer } from '#/server/createServer.js';
+import { createStubThrottleStore } from '#/server/auth/throttle/stubThrottleStore.js';
 
 /**
  * Builds a minimal database stub for route tests.
@@ -26,9 +27,10 @@ describe('GET /health', () => {
       {
         host: '127.0.0.1',
         port: 8787,
-        db: { driver: 'postgres' }
+        db: { driver: 'postgres' },
+        redis: { host: '127.0.0.1', port: 6380 }
       },
-      { version: '0.1.0', db: createHealthStubDatabase() }
+      { version: '0.1.0', db: createHealthStubDatabase(), throttleStore: createStubThrottleStore() }
     );
 
     const response = await app.inject({

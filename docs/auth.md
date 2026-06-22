@@ -73,6 +73,39 @@ API tokens do not carry their own scope. Each token inherits the owning user's `
 
 - Invalid or missing token → **401** (see [API Endpoints — Errors](./endpoints.md#errors)).
 - Valid token but wrong role or out-of-scope resource → **403** `{ "error": "Forbidden" }`.
+- Too many failed auth attempts for the same client IP and token → **429** `{ "error": "Too Many Requests" }` with a `Retry-After` header.
+- Throttle store unavailable → **503** `{ "error": "Service Unavailable" }`.
+
+## Throttling
+
+Failed authentication attempts are counted in Redis and throttled per **client IP + token**. Raw bearer secrets are never stored in Redis; the server hashes the token and uses `{ip}:{sha256(token)}` as the throttle key. Requests with no bearer token use `{ip}:none`.
+
+**Default policy**
+
+| Setting | Default | Meaning |
+| ------- | ------- | ------- |
+| `maxFailures` | 10 | Failed attempts allowed within the window |
+| `windowSeconds` | 900 (15 min) | Failure counter window |
+| `blockSeconds` | 900 (15 min) | Block duration after threshold is reached |
+
+When the block is active, protected routes return **429** with `Retry-After` set to the configured block duration. A successful authentication clears the failure counter and block for that key.
+
+**Configuration**
+
+Redis is required. Add a `redis` section to `server.yaml` and run Redis alongside the server (for local development, `docker compose up` starts Postgres and Redis):
+
+```yaml
+redis:
+  host: 127.0.0.1
+  port: 6380
+  # password: optional
+  # keyPrefix: optional namespace for keys
+  # maxFailures: 10
+  # windowSeconds: 900
+  # blockSeconds: 900
+```
+
+If Redis is unreachable while handling a protected request, authentication fails closed with **503** rather than allowing requests through without throttling.
 
 ```mermaid
 flowchart TD

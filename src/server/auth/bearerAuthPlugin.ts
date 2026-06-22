@@ -3,6 +3,7 @@ import type { IDatabase } from '#/db/IDatabase.js';
 import type { ApiTokenRecord } from '#/db/types.js';
 import type { UserRecord } from '#/db/types.js';
 import { extractBearer, hashToken } from '#/server/auth/apiTokens.js';
+import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -29,12 +30,29 @@ export function registerBearerAuthDecorator(app: FastifyInstance): void {
 }
 
 /**
+ * Builds the throttle key for a request from client IP and bearer token material.
+ *
+ * Raw token secrets are hashed before inclusion in the key.
+ *
+ * @param request - Incoming HTTP request.
+ * @param token - Raw bearer token, or null when missing.
+ * @returns Throttle key in the form `{ip}:{tokenHash|none}`.
+ */
+export function buildAuthThrottleKey(request: FastifyRequest, token: string | null): string {
+  const tokenPart = token ? hashToken(token) : 'none';
+  return `${request.ip}:${tokenPart}`;
+}
+
+/**
  * Builds an onRequest hook that validates bearer tokens against the database.
  *
  * @param db - Database used to resolve active token hashes and owning users.
+ * @param throttleStore - Redis-backed store for failed auth throttling.
  * @returns Hook that rejects unauthenticated requests with HTTP 401.
  */
-export function createBearerAuthHook(db: IDatabase) {
+export function createBearerAuthHook(db: IDatabase, throttleStore: IThrottleStore) {
+  const policy = throttleStore.getPolicy();
+
   /**
    * Validates Authorization: Bearer and attaches the matching token and user.
    *
@@ -43,18 +61,55 @@ export function createBearerAuthHook(db: IDatabase) {
    */
   return async function bearerAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const token = extractBearer(request.headers.authorization);
+    const throttleKey = buildAuthThrottleKey(request, token);
+
+    try {
+      if (await throttleStore.isBlocked(throttleKey)) {
+        return reply
+          .header('Retry-After', String(policy.blockSeconds))
+          .code(429)
+          .send({ error: 'Too Many Requests' });
+      }
+    } catch {
+      return reply.code(503).send({ error: 'Service Unavailable' });
+    }
+
     if (!token) {
+      try {
+        await throttleStore.recordFailure(throttleKey);
+      } catch {
+        return reply.code(503).send({ error: 'Service Unavailable' });
+      }
+
       return reply.header('WWW-Authenticate', 'Bearer').code(401).send({ error: 'Unauthorized' });
     }
 
     const record = await db.findActiveApiTokenByHash(hashToken(token));
     if (!record) {
+      try {
+        await throttleStore.recordFailure(throttleKey);
+      } catch {
+        return reply.code(503).send({ error: 'Service Unavailable' });
+      }
+
       return reply.header('WWW-Authenticate', 'Bearer').code(401).send({ error: 'Unauthorized' });
     }
 
     const user = await db.findUserById(record.userId);
     if (!user) {
+      try {
+        await throttleStore.recordFailure(throttleKey);
+      } catch {
+        return reply.code(503).send({ error: 'Service Unavailable' });
+      }
+
       return reply.header('WWW-Authenticate', 'Bearer').code(401).send({ error: 'Unauthorized' });
+    }
+
+    try {
+      await throttleStore.reset(throttleKey);
+    } catch {
+      return reply.code(503).send({ error: 'Service Unavailable' });
     }
 
     request.apiToken = record;

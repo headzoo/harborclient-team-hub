@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { IDatabase } from '#/db/IDatabase.js';
+import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
 import { registerCollectionRoutes } from '#/server/routes/collections.js';
 import { registerEnvironmentRoutes } from '#/server/routes/environments.js';
 import { registerFolderRoutes } from '#/server/routes/folders.js';
@@ -20,6 +21,11 @@ export interface RegisterRoutesOptions {
    * Database used to validate bearer tokens on protected routes.
    */
   db: IDatabase;
+
+  /**
+   * Redis-backed store for authentication throttling on protected routes.
+   */
+  throttleStore: IThrottleStore;
 }
 
 /**
@@ -46,7 +52,7 @@ export async function registerProtectedRoutes(
   options: RegisterRoutesOptions
 ): Promise<void> {
   registerBearerAuthDecorator(app);
-  app.addHook('onRequest', createBearerAuthHook(options.db));
+  app.addHook('onRequest', createBearerAuthHook(options.db, options.throttleStore));
 
   await registerCollectionRoutes(app, options.db);
   await registerEnvironmentRoutes(app, options.db);

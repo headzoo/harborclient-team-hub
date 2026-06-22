@@ -5,9 +5,12 @@ import { createStubDatabase } from '#/db/stubDatabase.js';
 import type { ApiTokenRecord, UserRecord } from '#/db/types.js';
 import { hashToken } from '#/server/auth/apiTokens.js';
 import {
+  buildAuthThrottleKey,
   createBearerAuthHook,
   registerBearerAuthDecorator
 } from '#/server/auth/bearerAuthPlugin.js';
+import { DEFAULT_THROTTLE_POLICY } from '#/server/auth/throttle/IThrottleStore.js';
+import { createStubThrottleStore } from '#/server/auth/throttle/stubThrottleStore.js';
 
 const sampleUser: UserRecord = {
   id: 'user-1',
@@ -49,26 +52,56 @@ function createAuthDb(
 }
 
 /**
+ * Creates a permissive throttle store stub for bearer auth tests.
+ */
+function createAuthThrottleStore() {
+  const throttleStore = createStubThrottleStore();
+  throttleStore.isBlocked.mockResolvedValue(false);
+  throttleStore.recordFailure.mockResolvedValue(false);
+  throttleStore.reset.mockResolvedValue(undefined);
+  return throttleStore;
+}
+
+/**
  * Creates a Fastify app with one protected route behind bearer auth.
  *
  * @param db - Database stub used by the auth hook.
+ * @param throttleStore - Throttle store stub used by the auth hook.
  * @returns Listening-ready Fastify instance with GET /protected.
  */
-async function createProtectedApp(db: IDatabase) {
+async function createProtectedApp(db: IDatabase, throttleStore = createAuthThrottleStore()) {
   const app = Fastify();
 
   await app.register(async (protectedApp) => {
     registerBearerAuthDecorator(protectedApp);
-    protectedApp.addHook('onRequest', createBearerAuthHook(db));
+    protectedApp.addHook('onRequest', createBearerAuthHook(db, throttleStore));
     protectedApp.get('/protected', async () => ({ ok: true }));
   });
 
   return app;
 }
 
+describe('buildAuthThrottleKey', () => {
+  it('uses the token hash when a bearer token is present', () => {
+    const request = { ip: '127.0.0.1' } as Parameters<typeof buildAuthThrottleKey>[0];
+
+    expect(buildAuthThrottleKey(request, 'hbk_secret')).toBe(
+      `127.0.0.1:${hashToken('hbk_secret')}`
+    );
+  });
+
+  it('uses none when the bearer token is missing', () => {
+    const request = { ip: '127.0.0.1' } as Parameters<typeof buildAuthThrottleKey>[0];
+
+    expect(buildAuthThrottleKey(request, null)).toBe('127.0.0.1:none');
+  });
+});
+
 describe('createBearerAuthHook', () => {
   it('returns 401 when Authorization header is missing', async () => {
-    const app = await createProtectedApp(createAuthDb(sampleRecord));
+    const db = createAuthDb(sampleRecord);
+    const throttleStore = createAuthThrottleStore();
+    const app = await createProtectedApp(db, throttleStore);
 
     const response = await app.inject({
       method: 'GET',
@@ -78,12 +111,15 @@ describe('createBearerAuthHook', () => {
     expect(response.statusCode).toBe(401);
     expect(response.headers['www-authenticate']).toBe('Bearer');
     expect(response.json()).toEqual({ error: 'Unauthorized' });
+    expect(throttleStore.recordFailure).toHaveBeenCalledWith('127.0.0.1:none');
 
     await app.close();
   });
 
   it('returns 401 when the bearer token is invalid', async () => {
-    const app = await createProtectedApp(createAuthDb(null));
+    const db = createAuthDb(null);
+    const throttleStore = createAuthThrottleStore();
+    const app = await createProtectedApp(db, throttleStore);
 
     const response = await app.inject({
       method: 'GET',
@@ -95,12 +131,17 @@ describe('createBearerAuthHook', () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({ error: 'Unauthorized' });
+    expect(throttleStore.recordFailure).toHaveBeenCalledWith(
+      `127.0.0.1:${hashToken('hbk_invalid')}`
+    );
 
     await app.close();
   });
 
   it('returns 401 when the token owner user is missing', async () => {
-    const app = await createProtectedApp(createAuthDb(sampleRecord, null));
+    const db = createAuthDb(sampleRecord, null);
+    const throttleStore = createAuthThrottleStore();
+    const app = await createProtectedApp(db, throttleStore);
 
     const response = await app.inject({
       method: 'GET',
@@ -112,13 +153,59 @@ describe('createBearerAuthHook', () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({ error: 'Unauthorized' });
+    expect(throttleStore.recordFailure).toHaveBeenCalledWith(
+      `127.0.0.1:${hashToken('hbk_valid-token')}`
+    );
+
+    await app.close();
+  });
+
+  it('returns 429 when the throttle key is blocked', async () => {
+    const db = createAuthDb(sampleRecord);
+    const throttleStore = createAuthThrottleStore();
+    throttleStore.isBlocked.mockResolvedValue(true);
+    const app = await createProtectedApp(db, throttleStore);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/protected',
+      headers: {
+        authorization: 'Bearer hbk_valid-token'
+      }
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['retry-after']).toBe(String(DEFAULT_THROTTLE_POLICY.blockSeconds));
+    expect(response.json()).toEqual({ error: 'Too Many Requests' });
+    expect(throttleStore.recordFailure).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('returns 503 when the throttle store fails during the block check', async () => {
+    const db = createAuthDb(sampleRecord);
+    const throttleStore = createAuthThrottleStore();
+    throttleStore.isBlocked.mockRejectedValue(new Error('redis down'));
+    const app = await createProtectedApp(db, throttleStore);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/protected',
+      headers: {
+        authorization: 'Bearer hbk_valid-token'
+      }
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Service Unavailable' });
 
     await app.close();
   });
 
   it('allows requests with a valid bearer token', async () => {
     const db = createAuthDb(sampleRecord);
-    const app = await createProtectedApp(db);
+    const throttleStore = createAuthThrottleStore();
+    const app = await createProtectedApp(db, throttleStore);
 
     const response = await app.inject({
       method: 'GET',
@@ -133,6 +220,7 @@ describe('createBearerAuthHook', () => {
     expect(db.findActiveApiTokenByHash).toHaveBeenCalledWith(sampleRecord.tokenHash);
     expect(db.findUserById).toHaveBeenCalledWith(sampleUser.id);
     expect(db.touchApiTokenLastUsed).toHaveBeenCalledWith(sampleRecord.id, expect.any(Date));
+    expect(throttleStore.reset).toHaveBeenCalledWith(`127.0.0.1:${sampleRecord.tokenHash}`);
 
     await app.close();
   });

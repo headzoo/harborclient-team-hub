@@ -7,6 +7,7 @@ import {
 } from 'fastify-type-provider-zod';
 import type { ServerConfig } from '#/config/serverConfig.js';
 import type { IDatabase } from '#/db/IDatabase.js';
+import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
 import { registerRoutes } from '#/server/routes/index.js';
 
 export interface CreateServerOptions {
@@ -24,6 +25,11 @@ export interface CreateServerOptions {
    * Database used for bearer token validation on protected routes.
    */
   db: IDatabase;
+
+  /**
+   * Redis-backed store for authentication throttling on protected routes.
+   */
+  throttleStore: IThrottleStore;
 }
 
 /**
@@ -60,7 +66,8 @@ export async function createServer(
 
   await registerRoutes(app, {
     version: options.version ?? readPackageVersion(),
-    db: options.db
+    db: options.db,
+    throttleStore: options.throttleStore
   });
 
   return app;

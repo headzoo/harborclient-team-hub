@@ -8,6 +8,8 @@ import { type Mocked } from 'vitest';
 import type { IDatabase } from '#/db/IDatabase.js';
 import type { ApiTokenRecord, UserRecord } from '#/db/types.js';
 import { hashToken } from '#/server/auth/apiTokens.js';
+import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
+import { createStubThrottleStore } from '#/server/auth/throttle/stubThrottleStore.js';
 import { registerProtectedRoutes } from '#/server/routes/index.js';
 
 export const validBearerToken = 'hbk_valid-token';
@@ -49,6 +51,11 @@ export interface CreateProtectedTestAppOptions {
   db: Mocked<IDatabase>;
 
   /**
+   * Throttle store stub wired into bearer auth; defaults to a permissive stub.
+   */
+  throttleStore?: Mocked<IThrottleStore>;
+
+  /**
    * When true, configures auth lookup to accept {@link validBearerToken}.
    */
   withValidAuth?: boolean;
@@ -69,6 +76,7 @@ export async function createProtectedTestApp(
   options: CreateProtectedTestAppOptions
 ): Promise<FastifyInstance> {
   const user = options.user ?? sampleUserRecord;
+  const throttleStore = options.throttleStore ?? createDefaultThrottleStoreStub();
 
   if (options.withValidAuth) {
     options.db.findActiveApiTokenByHash.mockResolvedValue(sampleApiTokenRecord);
@@ -83,7 +91,8 @@ export async function createProtectedTestApp(
   await app.register(async (protectedApp) => {
     await registerProtectedRoutes(protectedApp, {
       version: '0.1.0',
-      db: options.db
+      db: options.db,
+      throttleStore
     });
   });
 
@@ -95,4 +104,15 @@ export async function createProtectedTestApp(
  */
 export function authHeader(): { authorization: string } {
   return { authorization: `Bearer ${validBearerToken}` };
+}
+
+/**
+ * Creates a permissive throttle store stub for route tests.
+ */
+function createDefaultThrottleStoreStub(): Mocked<IThrottleStore> {
+  const throttleStore = createStubThrottleStore();
+  throttleStore.isBlocked.mockResolvedValue(false);
+  throttleStore.recordFailure.mockResolvedValue(false);
+  throttleStore.reset.mockResolvedValue(undefined);
+  return throttleStore;
 }

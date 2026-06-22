@@ -26,12 +26,17 @@ const sampleDbSection = `db:
   database: harbor
 `;
 
+const sampleRedisSection = `redis:
+  host: 127.0.0.1
+  port: 6380
+`;
+
 describe('loadServerConfig', () => {
   it('loads a valid nested config', () => {
     const configPath = writeConfig(`server:
   port: 8787
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
 
     expect(loadServerConfig(configPath)).toEqual({
       port: 8787,
@@ -43,6 +48,10 @@ ${sampleDbSection}`);
         user: 'harbor',
         password: 'harbor',
         database: 'harbor'
+      },
+      redis: {
+        host: '127.0.0.1',
+        port: 6380
       }
     });
   });
@@ -51,7 +60,7 @@ ${sampleDbSection}`);
     const configPath = writeConfig(`server:
   port: "9000"
   host: 0.0.0.0
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
 
     expect(loadServerConfig(configPath)).toEqual({
       port: 9000,
@@ -63,6 +72,10 @@ ${sampleDbSection}`);
         user: 'harbor',
         password: 'harbor',
         database: 'harbor'
+      },
+      redis: {
+        host: '127.0.0.1',
+        port: 6380
       }
     });
   });
@@ -102,7 +115,7 @@ host: 127.0.0.1
   it('throws when server.host is missing', () => {
     const configPath = writeConfig(`server:
   port: 8787
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
 
     expect(() => loadServerConfig(configPath)).toThrow('Config must include server.host.');
   });
@@ -127,11 +140,42 @@ db:
     expect(() => loadServerConfig(configPath)).toThrow('Config must include db.driver.');
   });
 
+  it('throws when redis mapping is missing', () => {
+    const configPath = writeConfig(`server:
+  port: 8787
+  host: 127.0.0.1
+${sampleDbSection}`);
+
+    expect(() => loadServerConfig(configPath)).toThrow('Config must include a "redis" mapping.');
+  });
+
+  it('throws when redis.host is missing', () => {
+    const configPath = writeConfig(`server:
+  port: 8787
+  host: 127.0.0.1
+${sampleDbSection}redis:
+  port: 6380
+`);
+
+    expect(() => loadServerConfig(configPath)).toThrow('Config must include redis.host.');
+  });
+
+  it('throws when redis.port is missing', () => {
+    const configPath = writeConfig(`server:
+  port: 8787
+  host: 127.0.0.1
+${sampleDbSection}redis:
+  host: 127.0.0.1
+`);
+
+    expect(() => loadServerConfig(configPath)).toThrow('Config must include redis.port.');
+  });
+
   it('throws on invalid port values', () => {
     const configPath = writeConfig(`server:
   port: 99999
   host: 127.0.0.1
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
 
     expect(() => loadServerConfig(configPath)).toThrow(
       'Port must be an integer between 1 and 65535.'
@@ -142,7 +186,7 @@ ${sampleDbSection}`);
     const configPath = writeConfig(`server:
   port: 8787
   host: "   "
-${sampleDbSection}`);
+${sampleDbSection}${sampleRedisSection}`);
 
     expect(() => loadServerConfig(configPath)).toThrow('Host must not be empty.');
   });

@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import type { ZodError } from 'zod/v4';
 import {
   dbSectionSchema,
+  redisSectionSchema,
   serverConfigDocumentSchema,
   serverSectionSchema
 } from '#/config/serverConfig.schema.js';
@@ -28,6 +29,11 @@ export interface ServerConfig {
    * Raw `db` section from server.yaml; validated per driver by {@link createDatabase}.
    */
   db: Record<string, unknown>;
+
+  /**
+   * Raw `redis` section from server.yaml; validated by {@link RedisThrottleStore.fromConfig}.
+   */
+  redis: Record<string, unknown>;
 }
 
 /**
@@ -96,6 +102,22 @@ function assertDocumentShape(document: unknown): void {
   if (!('driver' in dbSection)) {
     throw new ConfigError('Config must include db.driver.');
   }
+
+  const redis = root.redis;
+
+  if (redis === null || typeof redis !== 'object' || Array.isArray(redis)) {
+    throw new ConfigError('Config must include a "redis" mapping.');
+  }
+
+  const redisSection = redis as Record<string, unknown>;
+
+  if (!('host' in redisSection)) {
+    throw new ConfigError('Config must include redis.host.');
+  }
+
+  if (!('port' in redisSection)) {
+    throw new ConfigError('Config must include redis.port.');
+  }
 }
 
 /**
@@ -140,6 +162,12 @@ function parseServerConfig(document: unknown): ServerConfig {
     throw new ConfigError(formatZodError(parsedDbSection.error));
   }
 
+  const parsedRedisSection = redisSectionSchema.safeParse(root.redis);
+
+  if (!parsedRedisSection.success) {
+    throw new ConfigError(formatZodError(parsedRedisSection.error));
+  }
+
   const parsedDocument = serverConfigDocumentSchema.safeParse(document);
   if (!parsedDocument.success) {
     throw new ConfigError(formatZodError(parsedDocument.error));
@@ -148,7 +176,8 @@ function parseServerConfig(document: unknown): ServerConfig {
   return {
     port: parsedDocument.data.server.port,
     host: parsedDocument.data.server.host,
-    db: parsedDbSection.data as Record<string, unknown>
+    db: parsedDbSection.data as Record<string, unknown>,
+    redis: parsedRedisSection.data as Record<string, unknown>
   };
 }
 
