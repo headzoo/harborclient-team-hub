@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress';
+import { withMermaid } from 'vitepress-plugin-mermaid';
 import pkg from '../../package.json';
 import { toAnchor } from '../../scripts/docs-slugger.mjs';
 import { sidebar } from './sidebar.generated';
@@ -13,98 +14,106 @@ const withSiteBase = (path: string) => {
   return `${siteBase.replace(/\/$/, '')}${path}`;
 };
 
-export default defineConfig({
-  title: 'HarborClient Server',
-  description: 'Central server for HarborClient',
-  base: siteBase,
-  appearance: 'force-dark',
-  cleanUrls: true,
-  head: [
-    [
-      'link',
-      {
-        rel: 'icon',
-        type: 'image/png',
-        sizes: '32x32',
-        href: withSiteBase('/images/favicon-32x32.png'),
-      },
+export default withMermaid(
+  defineConfig({
+    title: 'HarborClient Server',
+    description: 'Central server for HarborClient',
+    base: siteBase,
+    appearance: 'force-dark',
+    cleanUrls: true,
+    head: [
+      [
+        'link',
+        {
+          rel: 'icon',
+          type: 'image/png',
+          sizes: '32x32',
+          href: withSiteBase('/images/favicon-32x32.png'),
+        },
+      ],
+      [
+        'link',
+        {
+          rel: 'icon',
+          type: 'image/png',
+          sizes: '16x16',
+          href: withSiteBase('/images/favicon-16x16.png'),
+        },
+      ],
+      [
+        'link',
+        {
+          rel: 'apple-touch-icon',
+          sizes: '128x128',
+          href: withSiteBase('/images/apple-touch-icon.png'),
+        },
+      ],
     ],
-    [
-      'link',
-      {
-        rel: 'icon',
-        type: 'image/png',
-        sizes: '16x16',
-        href: withSiteBase('/images/favicon-16x16.png'),
+    vite: {
+      publicDir: '.vitepress/static',
+      optimizeDeps: {
+        include: ['mermaid'],
       },
-    ],
-    [
-      'link',
-      {
-        rel: 'apple-touch-icon',
-        sizes: '128x128',
-        href: withSiteBase('/images/apple-touch-icon.png'),
-      },
-    ],
-  ],
-  vite: {
-    publicDir: '.vitepress/static',
-  },
-  ignoreDeadLinks: [/^https?:\/\/localhost(?::\d+)?(?:\/|$)/],
-  markdown: {
-    anchor: {
-      slugify: toAnchor,
     },
-    config(md) {
-      const defaultRender =
-        md.renderer.rules.image ??
-        ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+    ignoreDeadLinks: [/^https?:\/\/localhost(?::\d+)?(?:\/|$)/],
+    markdown: {
+      anchor: {
+        slugify: toAnchor,
+      },
+      config(md) {
+        const defaultRender =
+          md.renderer.rules.image ??
+          ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
 
-      md.renderer.rules.image = (tokens, idx, options, env, self) => {
-        const renderedImage = defaultRender(tokens, idx, options, env, self);
-        const token = tokens[idx];
-        const src = token.attrGet('src');
-        const isAlreadyLinked =
-          tokens[idx - 1]?.type === 'link_open' && tokens[idx + 1]?.type === 'link_close';
+        md.renderer.rules.image = (tokens, idx, options, env, self) => {
+          const renderedImage = defaultRender(tokens, idx, options, env, self);
+          const token = tokens[idx];
+          const src = token.attrGet('src');
+          const isAlreadyLinked =
+            tokens[idx - 1]?.type === 'link_open' && tokens[idx + 1]?.type === 'link_close';
 
-        if (!src || isAlreadyLinked || src.endsWith('/images/logo.png')) {
-          return renderedImage;
-        }
+          if (!src || isAlreadyLinked || src.endsWith('/images/logo.png')) {
+            return renderedImage;
+          }
 
-        return `<a class="vp-doc-image-link" href="${md.utils.escapeHtml(withSiteBase(src))}" target="_blank" rel="noopener noreferrer">${renderedImage}</a>`;
-      };
-    },
-    gfmAlerts: true,
-    languageAlias: {
-      env: 'dotenv',
-    },
-  },
-  themeConfig: {
-    logo: {
-      src: '/images/logo.png',
-      alt: 'HarborClient Server',
-    },
-    siteTitle: false,
-    nav: [
-      {
-        text: `v${pkg.version}`,
-        link: 'https://github.com/headzoo/harborclient-server/releases',
+          return `<a class="vp-doc-image-link" href="${md.utils.escapeHtml(withSiteBase(src))}" target="_blank" rel="noopener noreferrer">${renderedImage}</a>`;
+        };
       },
-    ],
-    socialLinks: [
-      {
-        icon: 'github',
-        link: 'https://github.com/headzoo/harborclient-server',
-        ariaLabel: 'HarborClient Server on GitHub',
+      gfmAlerts: true,
+      languageAlias: {
+        env: 'dotenv',
       },
-    ],
-    sidebar,
-    outline: {
-      level: [2, 3],
-      label: 'On this page',
     },
-    search: {
-      provider: 'local',
+    themeConfig: {
+      logo: {
+        src: '/images/logo.png',
+        alt: 'HarborClient Server',
+      },
+      siteTitle: false,
+      nav: [
+        {
+          text: `v${pkg.version}`,
+          link: 'https://github.com/headzoo/harborclient-server/releases',
+        },
+      ],
+      socialLinks: [
+        {
+          icon: 'github',
+          link: 'https://github.com/headzoo/harborclient-server',
+          ariaLabel: 'HarborClient Server on GitHub',
+        },
+      ],
+      sidebar,
+      outline: {
+        level: [2, 3],
+        label: 'On this page',
+      },
+      search: {
+        provider: 'local',
+      },
     },
-  },
-});
+    mermaid: {
+      theme: 'dark',
+    },
+  }),
+);

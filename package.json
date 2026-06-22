@@ -46,12 +46,14 @@
     "concurrently": "^8.2.2",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.5",
+    "mermaid": "^11.15.0",
     "prettier": "^3.8.4",
     "tsup": "^8.5.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.36.0",
     "vitepress": "^1.6.4",
+    "vitepress-plugin-mermaid": "^2.0.17",
     "vitest": "^4.1.9"
   }
 }

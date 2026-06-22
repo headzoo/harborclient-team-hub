@@ -18,7 +18,8 @@ export interface UserRecord {
   name: string;
 
   /**
-   * Role determining whether the account may access shared data via the API.
+   * Role determining API capabilities: `user` for scoped entity access,
+   * `admin` for management API access without entity access.
    */
   role: UserRole;
 

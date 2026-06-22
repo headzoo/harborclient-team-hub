@@ -6,6 +6,7 @@ import {
   canCreateCollection,
   canCreateEnvironment,
   canUseDataApi,
+  isAdmin,
   filterAccessibleCollections,
   filterAccessibleEnvironments,
   hasWildcardAccess
@@ -78,6 +79,11 @@ describe('accessControl', () => {
   it('detects wildcard access lists', () => {
     expect(hasWildcardAccess(['*'])).toBe(true);
     expect(hasWildcardAccess(['collection-a'])).toBe(false);
+  });
+
+  it('identifies admin accounts', () => {
+    expect(isAdmin(adminUser)).toBe(true);
+    expect(isAdmin(baseUser)).toBe(false);
   });
 
   it('denies admins and scoped users correctly for collections', () => {

@@ -1,6 +1,6 @@
 # Authentication
 
-HarborClient Server protects API routes with database-backed bearer tokens tied to user accounts. Operators manage users and tokens via the CLI; HarborClient desktop clients authenticate with tokens issued to `user`-role accounts.
+HarborClient Server protects API routes with database-backed bearer tokens tied to user accounts. HarborClient desktop clients authenticate with `user`-role tokens for shared data; operators authenticate with `admin`-role tokens for account management via the REST API (management endpoints are planned). The CLI remains available for user and token administration today.
 
 ## Prerequisites
 
@@ -20,26 +20,27 @@ Every account has a role of either `user` or `admin`. Set the role when creating
 
 ### Roles
 
-| Role | Purpose | HTTP API | API tokens | CLI |
-| ---- | ------- | -------- | ---------- | --- |
-| `user` | HarborClient desktop clients | Entity routes (collections, environments, folders, requests) — see [API Endpoints](./endpoints.md) | Yes | User and token management (any operator with shell access) |
-| `admin` | Operator identity without data API access | **403 Forbidden** on all entity routes | **No** — token creation rejected | User and token management (any operator with shell access) |
+| Role | Purpose | Entity HTTP API | Management HTTP API | API tokens |
+| ---- | ------- | --------------- | ------------------- | ---------- |
+| `user` | HarborClient desktop clients | Scoped — [API Endpoints](./endpoints.md) | No (403) | Yes |
+| `admin` | Operators and automation | **403 Forbidden** | User/token CRUD (planned) | Yes |
 
 **`admin` accounts**
 
-- Cannot receive bearer tokens — `user token create` fails for admin users.
-- Always store empty access lists; passing `--collection-access` or `--environment-access` on create or update is rejected.
-- Provide a named operator account that cannot read or mutate shared HarborClient data via the HTTP API. The system prevents token issuance for this role.
+- Can receive bearer tokens for REST authentication.
+- Cannot access collections, environments, folders, or requests (403 on entity routes).
+- Do not use access lists (always stored empty); passing `--collection-access` or `--environment-access` on create or update is rejected.
+- User and token management via REST is planned; the CLI remains available today.
 
 **`user` accounts**
 
 - Intended for HarborClient desktop clients authenticating with `hbk_…` bearer tokens.
-- Permissions come from the role plus access lists described in [Access](#access) below.
-- User and token management has no HTTP endpoints — operators use the CLI regardless of their own account role.
+- Permissions come from access lists described in [Access](#access) below.
+- Cannot call management endpoints (403 when those routes exist).
 
 ### Access
 
-Access lists scope what a `user`-role account can see and change via the API. Both fields are independent JSON arrays of UUID strings on the user record. Only `user`-role accounts use these fields; `admin` accounts always have `[]`.
+Access lists scope what a `user`-role account can see and change on entity routes. Both fields are independent JSON arrays of UUID strings on the user record. Only `user`-role accounts use these fields; `admin` accounts always have `[]` and cannot access entity routes regardless.
 
 **Wildcard `*`**
 
@@ -76,17 +77,24 @@ API tokens do not carry their own scope. Each token inherits the owning user's `
 ```mermaid
 flowchart TD
   UserAccount["user account"]
-  Token["API token hbk_..."]
+  AdminAccount["admin account"]
+  UserToken["user token hbk_..."]
+  AdminToken["admin token hbk_..."]
   CollAccess["collectionAccess"]
   EnvAccess["environmentAccess"]
   CollRoutes["collections / folders / requests"]
   EnvRoutes["environments"]
+  MgmtRoutes["users / tokens planned"]
 
   UserAccount --> CollAccess
   UserAccount --> EnvAccess
-  Token -->|"inherits scope"| UserAccount
+  UserToken -->|"inherits scope"| UserAccount
   CollAccess --> CollRoutes
   EnvAccess --> EnvRoutes
+  AdminAccount --> AdminToken
+  AdminToken --> MgmtRoutes
+  AdminToken -->|"403"| CollRoutes
+  AdminToken -->|"403"| EnvRoutes
 ```
 
 ## Manage users
@@ -94,7 +102,7 @@ flowchart TD
 Use the command line to create and manage users.
 
 ```bash
-# Create an admin (CLI-only account)
+# Create an operator account (admin role, for management API tokens)
 harborclient-server user create --name ops --role admin
 
 # Create a user with full access
@@ -113,7 +121,7 @@ harborclient-server user delete <user-id>
 
 ## Manage tokens
 
-Tokens always belong to a user. Admin users cannot receive tokens.
+Tokens always belong to a user. Issue `user`-role tokens for HarborClient desktop clients and `admin`-role tokens for operator REST clients. Entity routes require a `user`-role token; management routes will require an `admin`-role token.
 
 ```bash
 harborclient-server user token create --user <user-id> --name "Alice laptop"

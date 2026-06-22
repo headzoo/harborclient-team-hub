@@ -1,7 +1,18 @@
 import type { CollectionRecord, EnvironmentRecord, UserRecord } from '#/db/types.js';
 
 /**
- * Returns true when the user may call collection/environment data API routes.
+ * Returns true when the authenticated user has an admin role.
+ *
+ * @param user - Authenticated user attached to the request.
+ * @returns True for `admin`-role accounts.
+ */
+export function isAdmin(user: UserRecord): boolean {
+  return user.role === 'admin';
+}
+
+/**
+ * Returns true when the user may call entity data API routes for collections,
+ * environments, folders, and requests.
  *
  * @param user - Authenticated user attached to the request.
  * @returns True for `user`-role accounts; false for admins.

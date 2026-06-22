@@ -363,11 +363,6 @@ export async function userTokenCreateCommand(
     throw new Error(`No user found with id ${options.user}.`);
   }
 
-  if (user.role === 'admin') {
-    await db.disconnect();
-    throw new Error('Admin users cannot have API tokens.');
-  }
-
   const { record, secret } = generateApiToken(user.id, options.name);
   await db.createApiToken(record);
   await db.disconnect();
