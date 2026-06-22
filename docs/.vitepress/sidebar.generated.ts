@@ -192,6 +192,17 @@ export const sidebar: DefaultTheme.SidebarItem[] =
         "collapsed": false
       },
       {
+        "text": "Authentication",
+        "link": "/endpoints#authentication",
+        "items": [
+          {
+            "text": "GET /auth/session",
+            "link": "/endpoints#get-authsession"
+          }
+        ],
+        "collapsed": false
+      },
+      {
         "text": "Collections",
         "link": "/endpoints#collections",
         "items": [

@@ -87,6 +87,48 @@ Public health check for load balancers and HarborClient connectivity probes. No 
 curl -s http://127.0.0.1:8788/health
 ```
 
+## Authentication
+
+### GET /auth/session
+
+Returns the authenticated user account, API token metadata, and derived capability flags. Requires a valid bearer token.
+
+Use this route to discover whether a token belongs to a `user` or `admin` account and which API surfaces it may call. HarborClient can probe this endpoint when saving a team hub connection to gate administration UI.
+
+**Response `200`:**
+
+```json
+{
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "alice",
+    "role": "user"
+  },
+  "token": {
+    "id": "660e8400-e29b-41d4-a716-446655440001",
+    "prefix": "hbk_AbCd1234"
+  },
+  "capabilities": {
+    "dataApi": true,
+    "managementApi": false,
+    "llm": true
+  }
+}
+```
+
+| Capability | `user` role | `admin` role |
+| ---------- | ----------- | ------------ |
+| `dataApi` | `true` | `false` |
+| `managementApi` | `false` | `true` |
+| `llm` | `true` when `llmAccess` is enabled | `false` |
+
+**Response `401`:** Missing, malformed, unknown, or revoked bearer token.
+
+```bash
+curl -s http://127.0.0.1:8788/auth/session \
+  -H "Authorization: Bearer hbk_your_token_here"
+```
+
 ## Collections
 
 Collections are top-level workspaces that hold folders, saved requests, and collection-scoped defaults (variables, headers, scripts, auth).

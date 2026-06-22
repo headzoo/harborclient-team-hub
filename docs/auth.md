@@ -76,6 +76,35 @@ API tokens do not carry their own scope. Each token inherits the owning user's `
 - Too many failed auth attempts for the same client IP and token → **429** `{ "error": "Too Many Requests" }` with a `Retry-After` header.
 - Throttle store unavailable → **503** `{ "error": "Service Unavailable" }`.
 
+## Session introspection
+
+Clients such as HarborClient can call **`GET /auth/session`** with a bearer token to learn which user account owns the token and which API surfaces it may use. The response includes:
+
+| Field | Description |
+| ----- | ----------- |
+| `user.id` | Stable user account identifier |
+| `user.name` | Display name |
+| `user.role` | `user` or `admin` |
+| `token.id` | API token record identifier |
+| `token.prefix` | Non-secret token prefix (for example `hbk_AbCd1234`) |
+| `capabilities.dataApi` | Entity routes (collections, environments, folders, requests) |
+| `capabilities.managementApi` | Management routes (user and token CRUD; planned) |
+| `capabilities.llm` | Hub-proxied LLM routes when enabled for the account |
+
+Example for a `user`-role token:
+
+```json
+{
+  "user": { "id": "550e8400-e29b-41d4-a716-446655440000", "name": "alice", "role": "user" },
+  "token": { "id": "660e8400-e29b-41d4-a716-446655440001", "prefix": "hbk_AbCd1234" },
+  "capabilities": { "dataApi": true, "managementApi": false, "llm": true }
+}
+```
+
+For an `admin`-role token, `dataApi` is `false` and `managementApi` is `true`. HarborClient can use this endpoint when saving a team hub connection to decide whether to show operator administration UI.
+
+See [API Endpoints — GET /auth/session](./endpoints.md#get-authsession) for the full route reference.
+
 ## Throttling
 
 Failed authentication attempts are counted in Redis and throttled per **client IP + token**. Raw bearer secrets are never stored in Redis; the server hashes the token and uses `{ip}:{sha256(token)}` as the throttle key. Requests with no bearer token use `{ip}:none`.
