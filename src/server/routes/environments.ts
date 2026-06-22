@@ -85,7 +85,7 @@ export async function registerEnvironmentRoutes(
           return;
         }
 
-        const environment = await db.createEnvironment(request.body.name);
+        const environment = await db.createEnvironment(request.body.name, user.id);
         return reply.send(serializeEnvironment(environment));
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -127,7 +127,8 @@ export async function registerEnvironmentRoutes(
         const environment = await db.updateEnvironment(
           request.params.id,
           request.body.name,
-          request.body.variables
+          request.body.variables,
+          user.id
         );
         return reply.send(serializeEnvironment(environment));
       } catch (error) {
@@ -165,7 +166,7 @@ export async function registerEnvironmentRoutes(
           return;
         }
 
-        await db.deleteEnvironment(request.params.id);
+        await db.deleteEnvironment(request.params.id, user.id);
         return reply.code(204).send(null);
       } catch (error) {
         if (handleDbError(reply, error)) {

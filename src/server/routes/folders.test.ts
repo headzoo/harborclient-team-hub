@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { createStubDatabase } from '#/db/stubDatabase.js';
 import { authHeader, createProtectedTestApp } from '#/server/routes/test/createTestApp.js';
+import { sampleAttribution } from '#/server/routes/test/sampleAttribution.js';
 
 const sampleFolder = {
   id: 'folder-1',
   collectionId: 'collection-1',
   name: 'Auth',
   sortOrder: 0,
-  createdAt: new Date('2026-01-03T00:00:00.000Z')
+  createdAt: new Date('2026-01-03T00:00:00.000Z'),
+  updatedAt: new Date('2026-01-03T00:00:00.000Z'),
+  ...sampleAttribution
 };
 
 describe('folder routes', () => {
@@ -24,7 +27,7 @@ describe('folder routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(db.createFolder).toHaveBeenCalledWith('collection-1', 'Auth');
+    expect(db.createFolder).toHaveBeenCalledWith('collection-1', 'Auth', 'user-1');
     expect(response.json().name).toBe('Auth');
 
     await app.close();
@@ -43,7 +46,11 @@ describe('folder routes', () => {
     });
 
     expect(response.statusCode).toBe(204);
-    expect(db.reorderFolders).toHaveBeenCalledWith('collection-1', ['folder-2', 'folder-1']);
+    expect(db.reorderFolders).toHaveBeenCalledWith(
+      'collection-1',
+      ['folder-2', 'folder-1'],
+      'user-1'
+    );
 
     await app.close();
   });

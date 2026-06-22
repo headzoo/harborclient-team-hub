@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import mysql, { type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { mapApiTokenSqlRow, type ApiTokenSqlRow } from '#/db/apiTokenRows.js';
+import { resolveActingUserName } from '#/db/attribution.js';
+import {
+  mapAuditLogSqlRow,
+  serializeAuditMetadata,
+  type AuditLogSqlRow
+} from '#/db/auditLogRows.js';
 import { BOOTSTRAP_USER_NAME } from '#/db/bootstrapUsers.js';
 import {
   mapCollectionSqlRow,
@@ -16,16 +22,32 @@ import type { IDatabase } from '#/db/IDatabase.js';
 import { MYSQL_DEFAULT_AUTH_JSON, MYSQL_MIGRATIONS } from '#/db/mysql/migrations.js';
 import { mysqlConfigSchema } from '#/db/mysql/schemas.js';
 import type { MysqlDatabaseConfig } from '#/db/mysql/types.js';
+import { createSystemUserInput, SYSTEM_USER_NAME } from '#/db/systemUsers.js';
 import { trimRequiredName } from '#/db/trimRequiredName.js';
-import { mapUserSqlRow, serializeAccessList, type UserSqlRow } from '#/db/userRows.js';
+import {
+  API_TOKEN_SELECT_COLUMNS,
+  AUDIT_LOG_SELECT_COLUMNS,
+  COLLECTION_SELECT_COLUMNS,
+  ENVIRONMENT_SELECT_COLUMNS,
+  FOLDER_SELECT_COLUMNS,
+  mapUserSqlRow,
+  REQUEST_SELECT_COLUMNS,
+  serializeAccessList,
+  USER_SELECT_COLUMNS,
+  type UserSqlRow
+} from '#/db/userRows.js';
 import type {
   ApiTokenRecord,
+  AuditAction,
+  AuditEntityType,
+  AuditLogRecord,
   AuthConfig,
   CollectionRecord,
   CreateUserInput,
   EnvironmentRecord,
   FolderRecord,
   KeyValue,
+  ListAuditLogOptions,
   SaveRequestInput,
   SavedRequestRecord,
   UpdateUserInput,
@@ -34,21 +56,13 @@ import type {
 } from '#/db/types.js';
 import { formatZodError } from '#/db/validation.js';
 
-const COLLECTION_SELECT =
-  'SELECT id, name, variables, headers, auth, pre_request_script, post_request_script, created_at FROM collections';
-const ENVIRONMENT_SELECT = 'SELECT id, name, variables, created_at FROM environments';
-const USER_SELECT =
-  'SELECT id, name, role, collection_access, environment_access, created_at, updated_at FROM users';
-const API_TOKEN_SELECT = `SELECT
-  id,
-  user_id,
-  name,
-  token_hash,
-  token_prefix,
-  created_at,
-  last_used_at,
-  revoked_at
-FROM api_tokens`;
+const COLLECTION_SELECT = `SELECT ${COLLECTION_SELECT_COLUMNS} FROM collections`;
+const ENVIRONMENT_SELECT = `SELECT ${ENVIRONMENT_SELECT_COLUMNS} FROM environments`;
+const USER_SELECT = `SELECT ${USER_SELECT_COLUMNS} FROM users`;
+const API_TOKEN_SELECT = `SELECT ${API_TOKEN_SELECT_COLUMNS} FROM api_tokens`;
+const FOLDER_SELECT = `SELECT ${FOLDER_SELECT_COLUMNS} FROM folders`;
+const REQUEST_SELECT = `SELECT ${REQUEST_SELECT_COLUMNS} FROM requests`;
+const AUDIT_LOG_SELECT = `SELECT ${AUDIT_LOG_SELECT_COLUMNS} FROM audit_log`;
 
 /**
  * MySQL-backed database implementation.
@@ -60,11 +74,16 @@ export class MysqlDatabase implements IDatabase {
   private pool: Pool | null = null;
 
   /**
+   * Cached identifier of the internal system user, when provisioned during migration.
+   */
+  private systemUserId: string | null = null;
+
+  /**
    * Creates a MySQL database instance from validated config.
    *
    * @param config - Parsed MySQL connection settings.
    */
-  constructor(private readonly config: MysqlDatabaseConfig) { }
+  constructor(private readonly config: MysqlDatabaseConfig) {}
 
   /**
    * Validates raw config and constructs a {@link MysqlDatabase}.
@@ -131,18 +150,62 @@ export class MysqlDatabase implements IDatabase {
       await this.executeStatement(sql);
     }
 
+    await this.ensureSystemUser();
     await this.migrateOrphanTokensToBootstrapUser();
+  }
+
+  /**
+   * Returns the stable identifier of the internal system user, when provisioned.
+   */
+  getSystemUserId(): string | null {
+    return this.systemUserId;
+  }
+
+  /**
+   * Lists audit log entries ordered newest-first with optional filters.
+   *
+   * @param options - Optional limit and filter criteria.
+   */
+  async listAuditLog(options: ListAuditLogOptions = {}): Promise<AuditLogRecord[]> {
+    const limit = options.limit ?? 100;
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (options.userId !== undefined) {
+      conditions.push('user_id = ?');
+      params.push(options.userId);
+    }
+
+    if (options.entityType !== undefined) {
+      conditions.push('entity_type = ?');
+      params.push(options.entityType);
+    }
+
+    if (options.entityId !== undefined) {
+      conditions.push('entity_id = ?');
+      params.push(options.entityId);
+    }
+
+    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const rows = await this.queryRows<AuditLogSqlRow & RowDataPacket>(
+      `${AUDIT_LOG_SELECT}${whereClause} ORDER BY created_at DESC LIMIT ?`,
+      [...params, limit]
+    );
+
+    return rows.map(mapAuditLogSqlRow);
   }
 
   /**
    * Creates a new user account with the given role and access lists.
    *
    * @param input - User fields to persist.
+   * @param actingUserId - User performing the create action.
    */
-  async createUser(input: CreateUserInput): Promise<UserRecord> {
+  async createUser(input: CreateUserInput, actingUserId: string): Promise<UserRecord> {
     const trimmedName = trimRequiredName(input.name, 'User name');
     const id = randomUUID();
     const now = new Date();
+    const attributionUserId = trimmedName === SYSTEM_USER_NAME ? id : actingUserId;
 
     await this.executeStatement(
       `INSERT INTO users (
@@ -152,8 +215,10 @@ export class MysqlDatabase implements IDatabase {
         collection_access,
         environment_access,
         created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         trimmedName,
@@ -161,9 +226,13 @@ export class MysqlDatabase implements IDatabase {
         serializeAccessList(input.collectionAccess),
         serializeAccessList(input.environmentAccess),
         now,
-        now
+        now,
+        attributionUserId,
+        attributionUserId
       ]
     );
+
+    await this.recordAuditEntry(actingUserId, 'create', 'user', id);
 
     const created = await this.findUserById(id);
     if (!created) {
@@ -216,8 +285,9 @@ export class MysqlDatabase implements IDatabase {
    *
    * @param id - User identifier to update.
    * @param input - Partial fields to apply.
+   * @param actingUserId - User performing the update action.
    */
-  async updateUser(id: string, input: UpdateUserInput): Promise<UserRecord> {
+  async updateUser(id: string, input: UpdateUserInput, actingUserId: string): Promise<UserRecord> {
     const existing = await this.findUserById(id);
     if (!existing) {
       throw new Error('User not found');
@@ -236,7 +306,8 @@ export class MysqlDatabase implements IDatabase {
         role = ?,
         collection_access = ?,
         environment_access = ?,
-        updated_at = ?
+        updated_at = ?,
+        updated_by_user_id = ?
       WHERE id = ?`,
       [
         name,
@@ -244,6 +315,7 @@ export class MysqlDatabase implements IDatabase {
         serializeAccessList(collectionAccess),
         serializeAccessList(environmentAccess),
         updatedAt,
+        actingUserId,
         id
       ]
     );
@@ -251,6 +323,8 @@ export class MysqlDatabase implements IDatabase {
     if ((result.affectedRows ?? 0) === 0) {
       throw new Error('User not found');
     }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'user', id);
 
     const updated = await this.findUserById(id);
     if (!updated) {
@@ -264,8 +338,11 @@ export class MysqlDatabase implements IDatabase {
    * Deletes a user account and revokes all of their API tokens.
    *
    * @param id - User identifier to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteUser(id: string): Promise<void> {
+  async deleteUser(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'user', id);
+
     const connection = await this.requirePool().getConnection();
     try {
       await connection.beginTransaction();
@@ -297,12 +374,20 @@ export class MysqlDatabase implements IDatabase {
 
     let bootstrapUser = await this.findUserByName(BOOTSTRAP_USER_NAME);
     if (!bootstrapUser) {
-      bootstrapUser = await this.createUser({
-        name: BOOTSTRAP_USER_NAME,
-        role: 'user',
-        collectionAccess: ['*'],
-        environmentAccess: ['*']
-      });
+      const systemUserId = this.systemUserId;
+      if (!systemUserId) {
+        throw new Error('System user is not provisioned');
+      }
+
+      bootstrapUser = await this.createUser(
+        {
+          name: BOOTSTRAP_USER_NAME,
+          role: 'user',
+          collectionAccess: ['*'],
+          environmentAccess: ['*']
+        },
+        systemUserId
+      );
     }
 
     await this.executeStatement('UPDATE api_tokens SET user_id = ? WHERE user_id IS NULL', [
@@ -314,8 +399,9 @@ export class MysqlDatabase implements IDatabase {
    * Inserts a new API token record.
    *
    * @param record - Token metadata to persist.
+   * @param actingUserId - User performing the create action.
    */
-  async createApiToken(record: ApiTokenRecord): Promise<void> {
+  async createApiToken(record: ApiTokenRecord, actingUserId: string): Promise<void> {
     await this.executeStatement(
       `INSERT INTO api_tokens (
         id,
@@ -325,8 +411,10 @@ export class MysqlDatabase implements IDatabase {
         token_prefix,
         created_at,
         last_used_at,
-        revoked_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        revoked_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id,
         record.userId,
@@ -335,9 +423,13 @@ export class MysqlDatabase implements IDatabase {
         record.tokenPrefix,
         record.createdAt,
         record.lastUsedAt,
-        record.revokedAt
+        record.revokedAt,
+        actingUserId,
+        actingUserId
       ]
     );
+
+    await this.recordAuditEntry(actingUserId, 'create', 'api_token', record.id);
   }
 
   /**
@@ -392,17 +484,24 @@ export class MysqlDatabase implements IDatabase {
    * Soft-revokes an active token by id.
    *
    * @param id - Token identifier to revoke.
+   * @param actingUserId - User performing the revoke action.
    */
-  async revokeApiToken(id: string): Promise<boolean> {
+  async revokeApiToken(id: string, actingUserId: string): Promise<boolean> {
     const result = await this.executeStatement(
       `UPDATE api_tokens
-      SET revoked_at = ?
+      SET revoked_at = ?,
+        updated_by_user_id = ?
       WHERE id = ?
         AND revoked_at IS NULL`,
-      [new Date(), id]
+      [new Date(), actingUserId, id]
     );
 
-    return (result.affectedRows ?? 0) > 0;
+    const revoked = (result.affectedRows ?? 0) > 0;
+    if (revoked) {
+      await this.recordAuditEntry(actingUserId, 'update', 'api_token', id);
+    }
+
+    return revoked;
   }
 
   /**
@@ -429,11 +528,12 @@ export class MysqlDatabase implements IDatabase {
    * Creates a new collection with the given name.
    *
    * @param name - Display name for the collection.
+   * @param actingUserId - User performing the create action.
    */
-  async createCollection(name: string): Promise<CollectionRecord> {
+  async createCollection(name: string, actingUserId: string): Promise<CollectionRecord> {
     const trimmedName = trimRequiredName(name, 'Collection name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
 
     await this.executeStatement(
       `INSERT INTO collections (
@@ -444,10 +544,15 @@ export class MysqlDatabase implements IDatabase {
         auth,
         pre_request_script,
         post_request_script,
-        created_at
-      ) VALUES (?, ?, '[]', '[]', ?, '', '', ?)`,
-      [id, trimmedName, MYSQL_DEFAULT_AUTH_JSON, createdAt]
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, '[]', '[]', ?, '', '', ?, ?, ?, ?)`,
+      [id, trimmedName, MYSQL_DEFAULT_AUTH_JSON, now, now, actingUserId, actingUserId]
     );
+
+    await this.recordAuditEntry(actingUserId, 'create', 'collection', id);
 
     const rows = await this.queryRows<CollectionSqlRow & RowDataPacket>(
       `${COLLECTION_SELECT} WHERE id = ?`,
@@ -463,6 +568,8 @@ export class MysqlDatabase implements IDatabase {
 
   /**
    * Updates a collection's name, variables, headers, and scripts.
+   *
+   * @param actingUserId - User performing the update action.
    */
   async updateCollection(
     id: string,
@@ -471,9 +578,11 @@ export class MysqlDatabase implements IDatabase {
     headers: KeyValue[],
     preRequestScript: string,
     postRequestScript: string,
-    auth: AuthConfig
+    auth: AuthConfig,
+    actingUserId: string
   ): Promise<CollectionRecord> {
     const trimmedName = trimRequiredName(name, 'Collection name');
+    const updatedAt = new Date();
     const result = await this.executeStatement(
       `UPDATE collections
       SET name = ?,
@@ -481,7 +590,9 @@ export class MysqlDatabase implements IDatabase {
         headers = ?,
         auth = ?,
         pre_request_script = ?,
-        post_request_script = ?
+        post_request_script = ?,
+        updated_at = ?,
+        updated_by_user_id = ?
       WHERE id = ?`,
       [
         trimmedName,
@@ -490,6 +601,8 @@ export class MysqlDatabase implements IDatabase {
         JSON.stringify(auth),
         preRequestScript,
         postRequestScript,
+        updatedAt,
+        actingUserId,
         id
       ]
     );
@@ -497,6 +610,8 @@ export class MysqlDatabase implements IDatabase {
     if ((result.affectedRows ?? 0) === 0) {
       throw new Error('Collection not found');
     }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'collection', id);
 
     const rows = await this.queryRows<CollectionSqlRow & RowDataPacket>(
       `${COLLECTION_SELECT} WHERE id = ?`,
@@ -514,8 +629,10 @@ export class MysqlDatabase implements IDatabase {
    * Deletes a collection and all of its requests and folders.
    *
    * @param id - Collection ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteCollection(id: string): Promise<void> {
+  async deleteCollection(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'collection', id);
     await this.executeStatement('DELETE FROM collections WHERE id = ?', [id]);
   }
 
@@ -533,16 +650,27 @@ export class MysqlDatabase implements IDatabase {
    * Creates a new environment with the given name.
    *
    * @param name - Display name for the environment.
+   * @param actingUserId - User performing the create action.
    */
-  async createEnvironment(name: string): Promise<EnvironmentRecord> {
+  async createEnvironment(name: string, actingUserId: string): Promise<EnvironmentRecord> {
     const trimmedName = trimRequiredName(name, 'Environment name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
 
     await this.executeStatement(
-      `INSERT INTO environments (id, name, variables, created_at) VALUES (?, ?, '[]', ?)`,
-      [id, trimmedName, createdAt]
+      `INSERT INTO environments (
+        id,
+        name,
+        variables,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, '[]', ?, ?, ?, ?)`,
+      [id, trimmedName, now, now, actingUserId, actingUserId]
     );
+
+    await this.recordAuditEntry(actingUserId, 'create', 'environment', id);
 
     const rows = await this.queryRows<EnvironmentSqlRow & RowDataPacket>(
       `${ENVIRONMENT_SELECT} WHERE id = ?`,
@@ -558,21 +686,32 @@ export class MysqlDatabase implements IDatabase {
 
   /**
    * Updates an environment's name and variables.
+   *
+   * @param actingUserId - User performing the update action.
    */
   async updateEnvironment(
     id: string,
     name: string,
-    variables: Variable[]
+    variables: Variable[],
+    actingUserId: string
   ): Promise<EnvironmentRecord> {
     const trimmedName = trimRequiredName(name, 'Environment name');
+    const updatedAt = new Date();
     const result = await this.executeStatement(
-      'UPDATE environments SET name = ?, variables = ? WHERE id = ?',
-      [trimmedName, JSON.stringify(variables), id]
+      `UPDATE environments
+      SET name = ?,
+        variables = ?,
+        updated_at = ?,
+        updated_by_user_id = ?
+      WHERE id = ?`,
+      [trimmedName, JSON.stringify(variables), updatedAt, actingUserId, id]
     );
 
     if ((result.affectedRows ?? 0) === 0) {
       throw new Error('Environment not found');
     }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'environment', id);
 
     const rows = await this.queryRows<EnvironmentSqlRow & RowDataPacket>(
       `${ENVIRONMENT_SELECT} WHERE id = ?`,
@@ -590,8 +729,10 @@ export class MysqlDatabase implements IDatabase {
    * Deletes an environment.
    *
    * @param id - Environment ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteEnvironment(id: string): Promise<void> {
+  async deleteEnvironment(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'environment', id);
     await this.executeStatement('DELETE FROM environments WHERE id = ?', [id]);
   }
 
@@ -602,7 +743,7 @@ export class MysqlDatabase implements IDatabase {
    */
   async listRequests(collectionId: string): Promise<SavedRequestRecord[]> {
     const rows = await this.queryRows<RequestSqlRow & RowDataPacket>(
-      'SELECT * FROM requests WHERE collection_id = ? ORDER BY sort_order ASC, name ASC',
+      `${REQUEST_SELECT} WHERE collection_id = ? ORDER BY sort_order ASC, name ASC`,
       [collectionId]
     );
     return rows.map(mapRequestSqlRow);
@@ -615,7 +756,7 @@ export class MysqlDatabase implements IDatabase {
    */
   async findRequestById(id: string): Promise<SavedRequestRecord | null> {
     const rows = await this.queryRows<RequestSqlRow & RowDataPacket>(
-      'SELECT * FROM requests WHERE id = ? LIMIT 1',
+      `${REQUEST_SELECT} WHERE id = ? LIMIT 1`,
       [id]
     );
     const row = rows[0];
@@ -626,8 +767,9 @@ export class MysqlDatabase implements IDatabase {
    * Inserts a new request or updates an existing one.
    *
    * @param input - Request fields to persist.
+   * @param actingUserId - User performing the save action.
    */
-  async saveRequest(input: SaveRequestInput): Promise<SavedRequestRecord> {
+  async saveRequest(input: SaveRequestInput, actingUserId: string): Promise<SavedRequestRecord> {
     const trimmedName = trimRequiredName(input.name, 'Request name');
     const headers = JSON.stringify(input.headers);
     const params = JSON.stringify(input.params);
@@ -662,7 +804,8 @@ export class MysqlDatabase implements IDatabase {
           pre_request_script = ?,
           post_request_script = ?,
           comment = ?,
-          updated_at = ?
+          updated_at = ?,
+          updated_by_user_id = ?
         WHERE id = ?`,
         [
           input.collectionId,
@@ -679,13 +822,16 @@ export class MysqlDatabase implements IDatabase {
           input.postRequestScript,
           input.comment,
           now,
+          actingUserId,
           input.id
         ]
       );
 
       if ((result.affectedRows ?? 0) > 0) {
+        await this.recordAuditEntry(actingUserId, 'update', 'request', input.id);
+
         const rows = await this.queryRows<RequestSqlRow & RowDataPacket>(
-          'SELECT * FROM requests WHERE id = ?',
+          `${REQUEST_SELECT} WHERE id = ?`,
           [input.id]
         );
         const row = rows[0];
@@ -722,8 +868,10 @@ export class MysqlDatabase implements IDatabase {
         comment,
         sort_order,
         created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.collectionId,
@@ -741,12 +889,16 @@ export class MysqlDatabase implements IDatabase {
         input.comment,
         maxOrder + 1,
         now,
-        now
+        now,
+        actingUserId,
+        actingUserId
       ]
     );
 
+    await this.recordAuditEntry(actingUserId, 'create', 'request', id);
+
     const rows = await this.queryRows<RequestSqlRow & RowDataPacket>(
-      'SELECT * FROM requests WHERE id = ?',
+      `${REQUEST_SELECT} WHERE id = ?`,
       [id]
     );
     const row = rows[0];
@@ -761,8 +913,10 @@ export class MysqlDatabase implements IDatabase {
    * Deletes a saved request by ID.
    *
    * @param id - Request ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteRequest(id: string): Promise<void> {
+  async deleteRequest(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'request', id);
     await this.executeStatement('DELETE FROM requests WHERE id = ?', [id]);
   }
 
@@ -773,7 +927,7 @@ export class MysqlDatabase implements IDatabase {
    */
   async listFolders(collectionId: string): Promise<FolderRecord[]> {
     const rows = await this.queryRows<FolderSqlRow & RowDataPacket>(
-      'SELECT * FROM folders WHERE collection_id = ? ORDER BY sort_order ASC, name ASC',
+      `${FOLDER_SELECT} WHERE collection_id = ? ORDER BY sort_order ASC, name ASC`,
       [collectionId]
     );
     return rows.map(mapFolderSqlRow);
@@ -786,7 +940,7 @@ export class MysqlDatabase implements IDatabase {
    */
   async findFolderById(id: string): Promise<FolderRecord | null> {
     const rows = await this.queryRows<FolderSqlRow & RowDataPacket>(
-      'SELECT * FROM folders WHERE id = ? LIMIT 1',
+      `${FOLDER_SELECT} WHERE id = ? LIMIT 1`,
       [id]
     );
     const row = rows[0];
@@ -798,11 +952,16 @@ export class MysqlDatabase implements IDatabase {
    *
    * @param collectionId - Collection to add the folder to.
    * @param name - Display name for the folder.
+   * @param actingUserId - User performing the create action.
    */
-  async createFolder(collectionId: string, name: string): Promise<FolderRecord> {
+  async createFolder(
+    collectionId: string,
+    name: string,
+    actingUserId: string
+  ): Promise<FolderRecord> {
     const trimmedName = trimRequiredName(name, 'Folder name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
     const maxRows = await this.queryRows<{ max_order: number | null } & RowDataPacket>(
       'SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM folders WHERE collection_id = ?',
       [collectionId]
@@ -810,13 +969,23 @@ export class MysqlDatabase implements IDatabase {
     const maxOrder = maxRows[0]?.max_order ?? -1;
 
     await this.executeStatement(
-      `INSERT INTO folders (id, collection_id, name, sort_order, created_at)
-      VALUES (?, ?, ?, ?, ?)`,
-      [id, collectionId, trimmedName, maxOrder + 1, createdAt]
+      `INSERT INTO folders (
+        id,
+        collection_id,
+        name,
+        sort_order,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, collectionId, trimmedName, maxOrder + 1, now, now, actingUserId, actingUserId]
     );
 
+    await this.recordAuditEntry(actingUserId, 'create', 'folder', id);
+
     const rows = await this.queryRows<FolderSqlRow & RowDataPacket>(
-      'SELECT * FROM folders WHERE id = ?',
+      `${FOLDER_SELECT} WHERE id = ?`,
       [id]
     );
     const row = rows[0];
@@ -832,20 +1001,28 @@ export class MysqlDatabase implements IDatabase {
    *
    * @param id - Folder ID to rename.
    * @param name - New display name.
+   * @param actingUserId - User performing the rename action.
    */
-  async renameFolder(id: string, name: string): Promise<FolderRecord> {
+  async renameFolder(id: string, name: string, actingUserId: string): Promise<FolderRecord> {
     const trimmedName = trimRequiredName(name, 'Folder name');
-    const result = await this.executeStatement('UPDATE folders SET name = ? WHERE id = ?', [
-      trimmedName,
-      id
-    ]);
+    const updatedAt = new Date();
+    const result = await this.executeStatement(
+      `UPDATE folders
+      SET name = ?,
+        updated_at = ?,
+        updated_by_user_id = ?
+      WHERE id = ?`,
+      [trimmedName, updatedAt, actingUserId, id]
+    );
 
     if ((result.affectedRows ?? 0) === 0) {
       throw new Error('Folder not found');
     }
 
+    await this.recordAuditEntry(actingUserId, 'update', 'folder', id);
+
     const rows = await this.queryRows<FolderSqlRow & RowDataPacket>(
-      'SELECT * FROM folders WHERE id = ?',
+      `${FOLDER_SELECT} WHERE id = ?`,
       [id]
     );
     const row = rows[0];
@@ -860,8 +1037,11 @@ export class MysqlDatabase implements IDatabase {
    * Deletes a folder and all requests inside it.
    *
    * @param id - Folder ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteFolder(id: string): Promise<void> {
+  async deleteFolder(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'folder', id);
+
     const connection = await this.requirePool().getConnection();
     try {
       await connection.beginTransaction();
@@ -881,15 +1061,25 @@ export class MysqlDatabase implements IDatabase {
    *
    * @param collectionId - Collection containing the folders.
    * @param orderedFolderIds - Folder IDs in desired order.
+   * @param actingUserId - User performing the reorder action.
    */
-  async reorderFolders(collectionId: string, orderedFolderIds: string[]): Promise<void> {
+  async reorderFolders(
+    collectionId: string,
+    orderedFolderIds: string[],
+    actingUserId: string
+  ): Promise<void> {
     const connection = await this.requirePool().getConnection();
+    const updatedAt = new Date();
     try {
       await connection.beginTransaction();
       for (let index = 0; index < orderedFolderIds.length; index++) {
         await connection.execute(
-          'UPDATE folders SET sort_order = ? WHERE id = ? AND collection_id = ?',
-          [index, orderedFolderIds[index], collectionId]
+          `UPDATE folders
+          SET sort_order = ?,
+            updated_at = ?,
+            updated_by_user_id = ?
+          WHERE id = ? AND collection_id = ?`,
+          [index, updatedAt, actingUserId, orderedFolderIds[index], collectionId]
         );
       }
       await connection.commit();
@@ -899,23 +1089,36 @@ export class MysqlDatabase implements IDatabase {
     } finally {
       connection.release();
     }
+
+    await this.recordAuditEntry(actingUserId, 'reorder', 'collection', collectionId, {
+      orderedFolderIds
+    });
   }
 
   /**
    * Reorders requests within a folder or at collection root.
+   *
+   * @param actingUserId - User performing the reorder action.
    */
   async reorderRequests(
     collectionId: string,
     folderId: string | null,
-    orderedRequestIds: string[]
+    orderedRequestIds: string[],
+    actingUserId: string
   ): Promise<void> {
     const connection = await this.requirePool().getConnection();
+    const updatedAt = new Date();
     try {
       await connection.beginTransaction();
       for (let index = 0; index < orderedRequestIds.length; index++) {
         await connection.execute(
-          'UPDATE requests SET sort_order = ?, folder_id = ? WHERE id = ? AND collection_id = ?',
-          [index, folderId, orderedRequestIds[index], collectionId]
+          `UPDATE requests
+          SET sort_order = ?,
+            folder_id = ?,
+            updated_at = ?,
+            updated_by_user_id = ?
+          WHERE id = ? AND collection_id = ?`,
+          [index, folderId, updatedAt, actingUserId, orderedRequestIds[index], collectionId]
         );
       }
       await connection.commit();
@@ -925,13 +1128,26 @@ export class MysqlDatabase implements IDatabase {
     } finally {
       connection.release();
     }
+
+    await this.recordAuditEntry(actingUserId, 'reorder', 'collection', collectionId, {
+      folderId,
+      orderedRequestIds
+    });
   }
 
   /**
    * Moves a request to another folder or collection root at a given index.
+   *
+   * @param actingUserId - User performing the move action.
    */
-  async moveRequest(requestId: string, folderId: string | null, index: number): Promise<void> {
+  async moveRequest(
+    requestId: string,
+    folderId: string | null,
+    index: number,
+    actingUserId: string
+  ): Promise<void> {
     const connection = await this.requirePool().getConnection();
+    const updatedAt = new Date();
 
     /**
      * Lists request ids in a container ordered for reindexing.
@@ -963,11 +1179,15 @@ export class MysqlDatabase implements IDatabase {
       orderedIds: string[]
     ): Promise<void> => {
       for (let sortIndex = 0; sortIndex < orderedIds.length; sortIndex++) {
-        await connection.execute('UPDATE requests SET sort_order = ?, folder_id = ? WHERE id = ?', [
-          sortIndex,
-          targetFolderId,
-          orderedIds[sortIndex]
-        ]);
+        await connection.execute(
+          `UPDATE requests
+          SET sort_order = ?,
+            folder_id = ?,
+            updated_at = ?,
+            updated_by_user_id = ?
+          WHERE id = ?`,
+          [sortIndex, targetFolderId, updatedAt, actingUserId, orderedIds[sortIndex]]
+        );
       }
     };
 
@@ -975,7 +1195,7 @@ export class MysqlDatabase implements IDatabase {
       await connection.beginTransaction();
 
       const [requestRows] = await connection.execute<(RequestSqlRow & RowDataPacket)[]>(
-        'SELECT * FROM requests WHERE id = ?',
+        `${REQUEST_SELECT} WHERE id = ?`,
         [requestId]
       );
       const requestRow = requestRows[0];
@@ -1023,6 +1243,98 @@ export class MysqlDatabase implements IDatabase {
     } finally {
       connection.release();
     }
+
+    await this.recordAuditEntry(actingUserId, 'move', 'request', requestId, {
+      folderId,
+      index
+    });
+  }
+
+  /**
+   * Ensures the internal system user exists and caches its identifier.
+   */
+  private async ensureSystemUser(): Promise<void> {
+    const existing = await this.findUserByName(SYSTEM_USER_NAME);
+    if (existing) {
+      this.systemUserId = existing.id;
+      return;
+    }
+
+    const input = createSystemUserInput();
+    const id = randomUUID();
+    const now = new Date();
+    const trimmedName = trimRequiredName(input.name, 'User name');
+
+    await this.executeStatement(
+      `INSERT INTO users (
+        id,
+        name,
+        role,
+        collection_access,
+        environment_access,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        trimmedName,
+        input.role,
+        serializeAccessList(input.collectionAccess),
+        serializeAccessList(input.environmentAccess),
+        now,
+        now,
+        id,
+        id
+      ]
+    );
+
+    this.systemUserId = id;
+  }
+
+  /**
+   * Persists a single audit log entry with a snapshot of the acting user's name.
+   *
+   * @param actingUserId - User performing the action.
+   * @param action - CRUD or structural action performed.
+   * @param entityType - Kind of entity affected.
+   * @param entityId - Identifier of the affected entity.
+   * @param metadata - Optional structured context for the action.
+   */
+  private async recordAuditEntry(
+    actingUserId: string,
+    action: AuditAction,
+    entityType: AuditEntityType,
+    entityId: string,
+    metadata?: Record<string, unknown> | null
+  ): Promise<void> {
+    const userName = await resolveActingUserName(this.findUserById.bind(this), actingUserId);
+    const id = randomUUID();
+    const now = new Date();
+
+    await this.executeStatement(
+      `INSERT INTO audit_log (
+        id,
+        user_id,
+        user_name,
+        action,
+        entity_type,
+        entity_id,
+        created_at,
+        metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        actingUserId,
+        userName,
+        action,
+        entityType,
+        entityId,
+        now,
+        serializeAuditMetadata(metadata ?? null)
+      ]
+    );
   }
 
   /**

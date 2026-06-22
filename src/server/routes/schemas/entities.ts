@@ -25,7 +25,10 @@ export const collectionRecordSchema = z.object({
   auth: authConfigSchema,
   preRequestScript: z.string(),
   postRequestScript: z.string(),
-  createdAt: timestampSchema
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  createdByUserId: z.string().nullable(),
+  updatedByUserId: z.string().nullable()
 });
 
 /**
@@ -35,7 +38,10 @@ export const environmentRecordSchema = z.object({
   id: z.string(),
   name: z.string(),
   variables: z.array(variableSchema),
-  createdAt: timestampSchema
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  createdByUserId: z.string().nullable(),
+  updatedByUserId: z.string().nullable()
 });
 
 /**
@@ -46,7 +52,10 @@ export const folderRecordSchema = z.object({
   collectionId: z.string(),
   name: z.string(),
   sortOrder: z.number().int(),
-  createdAt: timestampSchema
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  createdByUserId: z.string().nullable(),
+  updatedByUserId: z.string().nullable()
 });
 
 /**
@@ -69,7 +78,9 @@ export const savedRequestRecordSchema = z.object({
   folderId: z.string().nullable(),
   sortOrder: z.number().int(),
   createdAt: timestampSchema,
-  updatedAt: timestampSchema
+  updatedAt: timestampSchema,
+  createdByUserId: z.string().nullable(),
+  updatedByUserId: z.string().nullable()
 });
 
 /**
@@ -210,7 +221,8 @@ export const emptyResponseSchema = z.null();
 export function serializeCollection(record: CollectionRecord) {
   return {
     ...record,
-    createdAt: record.createdAt.toISOString()
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
   };
 }
 
@@ -223,7 +235,8 @@ export function serializeCollection(record: CollectionRecord) {
 export function serializeEnvironment(record: EnvironmentRecord) {
   return {
     ...record,
-    createdAt: record.createdAt.toISOString()
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
   };
 }
 
@@ -236,7 +249,8 @@ export function serializeEnvironment(record: EnvironmentRecord) {
 export function serializeFolder(record: FolderRecord) {
   return {
     ...record,
-    createdAt: record.createdAt.toISOString()
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
   };
 }
 

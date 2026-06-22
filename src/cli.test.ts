@@ -52,6 +52,7 @@ function createMockDatabase(): IDatabase {
   db.connect.mockResolvedValue(undefined);
   db.disconnect.mockResolvedValue(undefined);
   db.migrate.mockResolvedValue(undefined);
+  db.getSystemUserId.mockReturnValue('system-user-id');
   db.createUser.mockResolvedValue({
     id: 'user-1',
     name: 'Alice',
@@ -59,7 +60,9 @@ function createMockDatabase(): IDatabase {
     collectionAccess: ['*'],
     environmentAccess: ['*'],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-01T00:00:00.000Z')
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdByUserId: 'system-user-id',
+    updatedByUserId: 'system-user-id'
   });
   db.findUserById.mockResolvedValue({
     id: 'user-1',
@@ -68,7 +71,9 @@ function createMockDatabase(): IDatabase {
     collectionAccess: ['*'],
     environmentAccess: ['*'],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-01T00:00:00.000Z')
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdByUserId: 'system-user-id',
+    updatedByUserId: 'system-user-id'
   });
   db.listUsers.mockResolvedValue([]);
   db.updateUser.mockResolvedValue({
@@ -78,7 +83,9 @@ function createMockDatabase(): IDatabase {
     collectionAccess: ['*'],
     environmentAccess: ['*'],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-01T00:00:00.000Z')
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdByUserId: 'system-user-id',
+    updatedByUserId: 'system-user-id'
   });
   db.deleteUser.mockResolvedValue(undefined);
   db.migrateOrphanTokensToBootstrapUser.mockResolvedValue(undefined);
@@ -396,6 +403,7 @@ ${sampleDbSection}${sampleRedisSection}`);
 
     expect(db.connect).toHaveBeenCalledOnce();
     expect(db.createUser).toHaveBeenCalledOnce();
+    expect(db.migrate).toHaveBeenCalledOnce();
     expect(db.disconnect).toHaveBeenCalledOnce();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Created user "Alice"'));
 
@@ -436,7 +444,9 @@ ${sampleDbSection}${sampleRedisSection}`);
         collectionAccess: ['*'],
         environmentAccess: ['*'],
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        updatedAt: new Date('2026-01-01T00:00:00.000Z')
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        createdByUserId: null,
+        updatedByUserId: null
       }
     ]);
     createDatabaseMock.mockReturnValue(db);
@@ -465,7 +475,9 @@ ${sampleDbSection}${sampleRedisSection}`);
         tokenPrefix: 'hbk_AbCd1234',
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
         lastUsedAt: null,
-        revokedAt: null
+        revokedAt: null,
+        createdByUserId: 'system-user-id',
+        updatedByUserId: 'system-user-id'
       }
     ]);
     createDatabaseMock.mockReturnValue(db);
@@ -491,7 +503,7 @@ ${sampleDbSection}${sampleRedisSection}`);
 
     await userTokenRevokeCommand({ config: configPath, id: 'token-1' });
 
-    expect(db.revokeApiToken).toHaveBeenCalledWith('token-1');
+    expect(db.revokeApiToken).toHaveBeenCalledWith('token-1', 'system-user-id');
     expect(log).toHaveBeenCalledWith('Revoked API token token-1.');
 
     log.mockRestore();

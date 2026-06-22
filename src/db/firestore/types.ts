@@ -1,4 +1,5 @@
 import type { AuthConfig, KeyValue, UserRole, Variable } from '#/db/types.js';
+import type { AuditAction } from '#/db/types.js';
 
 /**
  * Validated configuration for a Firestore database connection.
@@ -48,6 +49,16 @@ export interface FirestoreUserDocument {
    * When the user account was last updated.
    */
   updatedAt: Date;
+
+  /**
+   * User who created the account.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the account.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -88,6 +99,16 @@ export interface FirestoreApiTokenDocument {
    * When the token was revoked; null means the token is still active.
    */
   revokedAt: Date | null;
+
+  /**
+   * User who created the token record.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the token record.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -128,6 +149,21 @@ export interface FirestoreCollectionDocument {
    * When the collection was created.
    */
   createdAt: Date;
+
+  /**
+   * When the collection was last updated.
+   */
+  updatedAt: Date;
+
+  /**
+   * User who created the collection.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the collection.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -148,6 +184,21 @@ export interface FirestoreEnvironmentDocument {
    * When the environment was created.
    */
   createdAt: Date;
+
+  /**
+   * When the environment was last updated.
+   */
+  updatedAt: Date;
+
+  /**
+   * User who created the environment.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the environment.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -173,6 +224,21 @@ export interface FirestoreFolderDocument {
    * When the folder was created.
    */
   createdAt: Date;
+
+  /**
+   * When the folder was last updated.
+   */
+  updatedAt: Date;
+
+  /**
+   * User who created the folder.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the folder.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -258,4 +324,54 @@ export interface FirestoreRequestDocument {
    * When the request was last saved.
    */
   updatedAt: Date;
+
+  /**
+   * User who created the request.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the request.
+   */
+  updatedByUserId: string | null;
+}
+
+/**
+ * Firestore document shape for persisted audit log entries.
+ */
+export interface FirestoreAuditLogDocument {
+  /**
+   * Acting user identifier, when known.
+   */
+  userId: string | null;
+
+  /**
+   * Snapshot of the acting user's display name at write time.
+   */
+  userName: string | null;
+
+  /**
+   * CRUD or structural action performed.
+   */
+  action: AuditAction;
+
+  /**
+   * Entity kind affected by the action.
+   */
+  entityType: string;
+
+  /**
+   * Identifier of the affected entity.
+   */
+  entityId: string;
+
+  /**
+   * When the action was recorded.
+   */
+  createdAt: Date;
+
+  /**
+   * Optional structured context for the action.
+   */
+  metadata: Record<string, unknown> | null;
 }

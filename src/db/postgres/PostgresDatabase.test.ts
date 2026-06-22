@@ -22,7 +22,7 @@ const { PoolMock } = vi.hoisted(() => {
      *
      * @param config - Connection settings passed to the pool constructor.
      */
-    constructor(public readonly config: unknown) { }
+    constructor(public readonly config: unknown) {}
   }
 
   return {
@@ -177,16 +177,21 @@ describe('PostgresDatabase api tokens', () => {
     const db = PostgresDatabase.fromConfig(validConfig);
 
     await expect(
-      db.createApiToken({
-        userId: 'user-1',
-        id: 'id',
-        name: 'name',
-        tokenHash: 'hash',
-        tokenPrefix: 'prefix',
-        createdAt: new Date(),
-        lastUsedAt: null,
-        revokedAt: null
-      })
+      db.createApiToken(
+        {
+          userId: 'user-1',
+          id: 'id',
+          name: 'name',
+          tokenHash: 'hash',
+          tokenPrefix: 'prefix',
+          createdAt: new Date(),
+          lastUsedAt: null,
+          revokedAt: null,
+          createdByUserId: null,
+          updatedByUserId: null
+        },
+        'user-1'
+      )
     ).rejects.toThrow('Postgres database is not connected.');
   });
 });
@@ -208,13 +213,17 @@ describe('PostgresDatabase collections', () => {
           auth: '{"type":"none","basic":{"username":"","password":""},"bearer":{"token":""}}',
           pre_request_script: '',
           post_request_script: '',
-          created_at: createdAt
+          created_at: createdAt,
+          updated_at: createdAt,
+          created_by_user_id: 'user-1',
+          updated_by_user_id: 'user-1'
         }
       ],
       rowCount: 1
     });
+    pool.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
 
-    const collection = await db.createCollection('Shared API');
+    const collection = await db.createCollection('Shared API', 'user-1');
 
     expect(collection.name).toBe('Shared API');
     expect(collection.id).toBe('collection-1');

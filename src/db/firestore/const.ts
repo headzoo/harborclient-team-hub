@@ -29,6 +29,11 @@ export const FOLDERS_COLLECTION = 'folders';
 export const REQUESTS_COLLECTION = 'requests';
 
 /**
+ * Firestore collection name for audit log documents.
+ */
+export const AUDIT_LOG_COLLECTION = 'auditLog';
+
+/**
  * Maximum writes per Firestore batch commit.
  */
 export const WRITE_BATCH_LIMIT = 500;

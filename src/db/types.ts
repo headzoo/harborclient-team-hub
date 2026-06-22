@@ -4,6 +4,92 @@
 export type UserRole = 'admin' | 'user';
 
 /**
+ * CRUD or structural action recorded in the audit log.
+ */
+export type AuditAction = 'create' | 'update' | 'delete' | 'reorder' | 'move';
+
+/**
+ * Entity kinds tracked by the audit log.
+ */
+export type AuditEntityType =
+  | 'user'
+  | 'api_token'
+  | 'collection'
+  | 'environment'
+  | 'folder'
+  | 'request';
+
+/**
+ * Persisted audit log entry describing a single mutating action.
+ */
+export interface AuditLogRecord {
+  /**
+   * Stable identifier for the audit entry.
+   */
+  id: string;
+
+  /**
+   * User who performed the action, when known.
+   */
+  userId: string | null;
+
+  /**
+   * Snapshot of the acting user's display name at write time.
+   */
+  userName: string | null;
+
+  /**
+   * Action that was performed.
+   */
+  action: AuditAction;
+
+  /**
+   * Kind of entity affected by the action.
+   */
+  entityType: AuditEntityType;
+
+  /**
+   * Identifier of the affected entity.
+   */
+  entityId: string;
+
+  /**
+   * When the action was recorded.
+   */
+  createdAt: Date;
+
+  /**
+   * Optional structured context for the action.
+   */
+  metadata: Record<string, unknown> | null;
+}
+
+/**
+ * Optional filters when listing audit log entries.
+ */
+export interface ListAuditLogOptions {
+  /**
+   * Maximum number of entries to return, newest first.
+   */
+  limit?: number;
+
+  /**
+   * Restrict results to a specific acting user.
+   */
+  userId?: string;
+
+  /**
+   * Restrict results to a specific entity type.
+   */
+  entityType?: AuditEntityType;
+
+  /**
+   * Restrict results to a specific entity id.
+   */
+  entityId?: string;
+}
+
+/**
  * Stored metadata for a Service Hub user account.
  */
 export interface UserRecord {
@@ -42,6 +128,16 @@ export interface UserRecord {
    * When the user account was last updated.
    */
   updatedAt: Date;
+
+  /**
+   * User who created the account.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the account.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -139,6 +235,16 @@ export interface ApiTokenRecord {
    * When the token was revoked; null means the token is still active.
    */
   revokedAt: Date | null;
+
+  /**
+   * User who created the token record.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the token record.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -269,6 +375,21 @@ export interface CollectionRecord {
    * When the collection was created.
    */
   createdAt: Date;
+
+  /**
+   * When the collection was last updated.
+   */
+  updatedAt: Date;
+
+  /**
+   * User who created the collection.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the collection.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -294,6 +415,21 @@ export interface EnvironmentRecord {
    * When the environment was created.
    */
   createdAt: Date;
+
+  /**
+   * When the environment was last updated.
+   */
+  updatedAt: Date;
+
+  /**
+   * User who created the environment.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the environment.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -324,6 +460,21 @@ export interface FolderRecord {
    * When the folder was created.
    */
   createdAt: Date;
+
+  /**
+   * When the folder was last updated.
+   */
+  updatedAt: Date;
+
+  /**
+   * User who created the folder.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the folder.
+   */
+  updatedByUserId: string | null;
 }
 
 /**
@@ -414,6 +565,16 @@ export interface SavedRequestRecord {
    * When the request was last saved.
    */
   updatedAt: Date;
+
+  /**
+   * User who created the request.
+   */
+  createdByUserId: string | null;
+
+  /**
+   * User who last updated the request.
+   */
+  updatedByUserId: string | null;
 }
 
 /**

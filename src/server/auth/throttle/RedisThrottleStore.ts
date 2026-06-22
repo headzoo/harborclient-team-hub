@@ -76,7 +76,7 @@ export class RedisThrottleStore implements IThrottleStore {
     private readonly client: RedisThrottleClient,
     private readonly config: Pick<RedisThrottleConfig, 'keyPrefix'>,
     private readonly policy: ThrottlePolicy
-  ) { }
+  ) {}
 
   /**
    * Validates raw config and constructs a {@link RedisThrottleStore}.

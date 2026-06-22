@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { mapApiTokenSqlRow, type ApiTokenSqlRow } from '#/db/apiTokenRows.js';
+import { resolveActingUserName } from '#/db/attribution.js';
+import {
+  mapAuditLogSqlRow,
+  serializeAuditMetadata,
+  type AuditLogSqlRow
+} from '#/db/auditLogRows.js';
 import { BOOTSTRAP_USER_NAME } from '#/db/bootstrapUsers.js';
 import {
   mapCollectionSqlRow,
@@ -16,16 +22,32 @@ import type { IDatabase } from '#/db/IDatabase.js';
 import { POSTGRES_MIGRATIONS } from '#/db/postgres/migrations.js';
 import { postgresConfigSchema } from '#/db/postgres/schemas.js';
 import type { PostgresDatabaseConfig } from '#/db/postgres/types.js';
+import { createSystemUserInput, SYSTEM_USER_NAME } from '#/db/systemUsers.js';
 import { trimRequiredName } from '#/db/trimRequiredName.js';
-import { mapUserSqlRow, serializeAccessList, type UserSqlRow } from '#/db/userRows.js';
+import {
+  API_TOKEN_SELECT_COLUMNS,
+  AUDIT_LOG_SELECT_COLUMNS,
+  COLLECTION_SELECT_COLUMNS,
+  ENVIRONMENT_SELECT_COLUMNS,
+  FOLDER_SELECT_COLUMNS,
+  mapUserSqlRow,
+  REQUEST_SELECT_COLUMNS,
+  serializeAccessList,
+  USER_SELECT_COLUMNS,
+  type UserSqlRow
+} from '#/db/userRows.js';
 import type {
   ApiTokenRecord,
+  AuditAction,
+  AuditEntityType,
+  AuditLogRecord,
   AuthConfig,
   CollectionRecord,
   CreateUserInput,
   EnvironmentRecord,
   FolderRecord,
   KeyValue,
+  ListAuditLogOptions,
   SaveRequestInput,
   SavedRequestRecord,
   UpdateUserInput,
@@ -37,21 +59,12 @@ import { formatZodError } from '#/db/validation.js';
 
 const { Pool } = pg;
 
-const COLLECTION_SELECT =
-  'SELECT id, name, variables, headers, auth, pre_request_script, post_request_script, created_at FROM collections';
-const ENVIRONMENT_SELECT = 'SELECT id, name, variables, created_at FROM environments';
-const USER_SELECT =
-  'SELECT id, name, role, collection_access, environment_access, created_at, updated_at FROM users';
-const API_TOKEN_SELECT = `SELECT
-  id,
-  user_id,
-  name,
-  token_hash,
-  token_prefix,
-  created_at,
-  last_used_at,
-  revoked_at
-FROM api_tokens`;
+const COLLECTION_SELECT = `SELECT ${COLLECTION_SELECT_COLUMNS} FROM collections`;
+const ENVIRONMENT_SELECT = `SELECT ${ENVIRONMENT_SELECT_COLUMNS} FROM environments`;
+const USER_SELECT = `SELECT ${USER_SELECT_COLUMNS} FROM users`;
+const API_TOKEN_SELECT = `SELECT ${API_TOKEN_SELECT_COLUMNS} FROM api_tokens`;
+const FOLDER_SELECT = `SELECT ${FOLDER_SELECT_COLUMNS} FROM folders`;
+const REQUEST_SELECT = `SELECT ${REQUEST_SELECT_COLUMNS} FROM requests`;
 
 /**
  * Postgres-backed database implementation.
@@ -63,11 +76,16 @@ export class PostgresDatabase implements IDatabase {
   private pool: pg.Pool | null = null;
 
   /**
+   * Cached identifier for the internal system user, when provisioned during migrate.
+   */
+  private systemUserId: string | null = null;
+
+  /**
    * Creates a Postgres database instance from validated config.
    *
    * @param config - Parsed Postgres connection settings.
    */
-  constructor(private readonly config: PostgresDatabaseConfig) { }
+  constructor(private readonly config: PostgresDatabaseConfig) {}
 
   /**
    * Validates raw config and constructs a {@link PostgresDatabase}.
@@ -134,15 +152,64 @@ export class PostgresDatabase implements IDatabase {
       await this.query(sql);
     }
 
+    await this.ensureSystemUser();
     await this.migrateOrphanTokensToBootstrapUser();
+  }
+
+  /**
+   * Returns the stable identifier of the internal system user, when provisioned.
+   */
+  getSystemUserId(): string | null {
+    return this.systemUserId;
+  }
+
+  /**
+   * Lists audit log entries ordered newest-first with optional filters.
+   *
+   * @param options - Optional limit and filter criteria.
+   */
+  async listAuditLog(options?: ListAuditLogOptions): Promise<AuditLogRecord[]> {
+    const limit = options?.limit ?? 100;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (options?.userId) {
+      conditions.push(`user_id = $${paramIndex++}`);
+      params.push(options.userId);
+    }
+
+    if (options?.entityType) {
+      conditions.push(`entity_type = $${paramIndex++}`);
+      params.push(options.entityType);
+    }
+
+    if (options?.entityId) {
+      conditions.push(`entity_id = $${paramIndex++}`);
+      params.push(options.entityId);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit);
+
+    const result = await this.query<AuditLogSqlRow>(
+      `SELECT ${AUDIT_LOG_SELECT_COLUMNS} FROM audit_log
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $${paramIndex}`,
+      params
+    );
+
+    return result.rows.map(mapAuditLogSqlRow);
   }
 
   /**
    * Creates a new user account with the given role and access lists.
    *
    * @param input - User fields to persist.
+   * @param actingUserId - User performing the create action.
    */
-  async createUser(input: CreateUserInput): Promise<UserRecord> {
+  async createUser(input: CreateUserInput, actingUserId: string): Promise<UserRecord> {
     const trimmedName = trimRequiredName(input.name, 'User name');
     const id = randomUUID();
     const now = new Date();
@@ -155,9 +222,11 @@ export class PostgresDatabase implements IDatabase {
         collection_access,
         environment_access,
         created_at,
-        updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, name, role, collection_access, environment_access, created_at, updated_at`,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING ${USER_SELECT_COLUMNS}`,
       [
         id,
         trimmedName,
@@ -165,7 +234,9 @@ export class PostgresDatabase implements IDatabase {
         serializeAccessList(input.collectionAccess),
         serializeAccessList(input.environmentAccess),
         now,
-        now
+        now,
+        actingUserId,
+        actingUserId
       ]
     );
 
@@ -173,6 +244,8 @@ export class PostgresDatabase implements IDatabase {
     if (!row) {
       throw new Error('User not found after insert');
     }
+
+    await this.recordAuditEntry(actingUserId, 'create', 'user', id);
 
     return mapUserSqlRow(row);
   }
@@ -212,8 +285,9 @@ export class PostgresDatabase implements IDatabase {
    *
    * @param id - User identifier to update.
    * @param input - Partial fields to apply.
+   * @param actingUserId - User performing the update action.
    */
-  async updateUser(id: string, input: UpdateUserInput): Promise<UserRecord> {
+  async updateUser(id: string, input: UpdateUserInput, actingUserId: string): Promise<UserRecord> {
     const existing = await this.findUserById(id);
     if (!existing) {
       throw new Error('User not found');
@@ -232,14 +306,16 @@ export class PostgresDatabase implements IDatabase {
         role = $2,
         collection_access = $3,
         environment_access = $4,
-        updated_at = $5
-      WHERE id = $6`,
+        updated_at = $5,
+        updated_by_user_id = $6
+      WHERE id = $7`,
       [
         name,
         role,
         serializeAccessList(collectionAccess),
         serializeAccessList(environmentAccess),
         updatedAt,
+        actingUserId,
         id
       ]
     );
@@ -247,6 +323,8 @@ export class PostgresDatabase implements IDatabase {
     if ((result.rowCount ?? 0) === 0) {
       throw new Error('User not found');
     }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'user', id);
 
     const updated = await this.findUserById(id);
     if (!updated) {
@@ -260,8 +338,11 @@ export class PostgresDatabase implements IDatabase {
    * Deletes a user account and revokes all of their API tokens.
    *
    * @param id - User identifier to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteUser(id: string): Promise<void> {
+  async deleteUser(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'user', id);
+
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
@@ -291,14 +372,22 @@ export class PostgresDatabase implements IDatabase {
       return;
     }
 
+    const systemUserId = this.getSystemUserId();
+    if (!systemUserId) {
+      throw new Error('System user is not provisioned');
+    }
+
     let bootstrapUser = await this.findUserByName(BOOTSTRAP_USER_NAME);
     if (!bootstrapUser) {
-      bootstrapUser = await this.createUser({
-        name: BOOTSTRAP_USER_NAME,
-        role: 'user',
-        collectionAccess: ['*'],
-        environmentAccess: ['*']
-      });
+      bootstrapUser = await this.createUser(
+        {
+          name: BOOTSTRAP_USER_NAME,
+          role: 'user',
+          collectionAccess: ['*'],
+          environmentAccess: ['*']
+        },
+        systemUserId
+      );
     }
 
     await this.query('UPDATE api_tokens SET user_id = $1 WHERE user_id IS NULL', [
@@ -310,8 +399,9 @@ export class PostgresDatabase implements IDatabase {
    * Inserts a new API token record.
    *
    * @param record - Token metadata to persist.
+   * @param actingUserId - User performing the create action.
    */
-  async createApiToken(record: ApiTokenRecord): Promise<void> {
+  async createApiToken(record: ApiTokenRecord, actingUserId: string): Promise<void> {
     await this.query(
       `INSERT INTO api_tokens (
         id,
@@ -321,8 +411,10 @@ export class PostgresDatabase implements IDatabase {
         token_prefix,
         created_at,
         last_used_at,
-        revoked_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        revoked_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         record.id,
         record.userId,
@@ -331,9 +423,13 @@ export class PostgresDatabase implements IDatabase {
         record.tokenPrefix,
         record.createdAt,
         record.lastUsedAt,
-        record.revokedAt
+        record.revokedAt,
+        actingUserId,
+        actingUserId
       ]
     );
+
+    await this.recordAuditEntry(actingUserId, 'create', 'api_token', record.id);
   }
 
   /**
@@ -388,17 +484,24 @@ export class PostgresDatabase implements IDatabase {
    * Soft-revokes an active token by id.
    *
    * @param id - Token identifier to revoke.
+   * @param actingUserId - User performing the revoke action.
    */
-  async revokeApiToken(id: string): Promise<boolean> {
+  async revokeApiToken(id: string, actingUserId: string): Promise<boolean> {
     const result = await this.query(
       `UPDATE api_tokens
-      SET revoked_at = $2
+      SET revoked_at = $2,
+        updated_by_user_id = $3
       WHERE id = $1
         AND revoked_at IS NULL`,
-      [id, new Date()]
+      [id, new Date(), actingUserId]
     );
 
-    return (result.rowCount ?? 0) > 0;
+    const revoked = (result.rowCount ?? 0) > 0;
+    if (revoked) {
+      await this.recordAuditEntry(actingUserId, 'update', 'api_token', id);
+    }
+
+    return revoked;
   }
 
   /**
@@ -423,11 +526,12 @@ export class PostgresDatabase implements IDatabase {
    * Creates a new collection with the given name.
    *
    * @param name - Display name for the collection.
+   * @param actingUserId - User performing the create action.
    */
-  async createCollection(name: string): Promise<CollectionRecord> {
+  async createCollection(name: string, actingUserId: string): Promise<CollectionRecord> {
     const trimmedName = trimRequiredName(name, 'Collection name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
 
     const result = await this.query<CollectionSqlRow>(
       `INSERT INTO collections (
@@ -438,10 +542,13 @@ export class PostgresDatabase implements IDatabase {
         auth,
         pre_request_script,
         post_request_script,
-        created_at
-      ) VALUES ($1, $2, '[]', '[]', $3, '', '', $4)
-      RETURNING id, name, variables, headers, auth, pre_request_script, post_request_script, created_at`,
-      [id, trimmedName, DEFAULT_AUTH_JSON, createdAt]
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES ($1, $2, '[]', '[]', $3, '', '', $4, $5, $6, $7)
+      RETURNING ${COLLECTION_SELECT_COLUMNS}`,
+      [id, trimmedName, DEFAULT_AUTH_JSON, now, now, actingUserId, actingUserId]
     );
 
     const row = result.rows[0];
@@ -449,11 +556,15 @@ export class PostgresDatabase implements IDatabase {
       throw new Error('Collection not found after insert');
     }
 
+    await this.recordAuditEntry(actingUserId, 'create', 'collection', id);
+
     return mapCollectionSqlRow(row);
   }
 
   /**
    * Updates a collection's name, variables, headers, and scripts.
+   *
+   * @param actingUserId - User performing the update action.
    */
   async updateCollection(
     id: string,
@@ -462,9 +573,11 @@ export class PostgresDatabase implements IDatabase {
     headers: KeyValue[],
     preRequestScript: string,
     postRequestScript: string,
-    auth: AuthConfig
+    auth: AuthConfig,
+    actingUserId: string
   ): Promise<CollectionRecord> {
     const trimmedName = trimRequiredName(name, 'Collection name');
+    const updatedAt = new Date();
     const result = await this.query(
       `UPDATE collections
       SET name = $1,
@@ -472,8 +585,10 @@ export class PostgresDatabase implements IDatabase {
         headers = $3,
         auth = $4,
         pre_request_script = $5,
-        post_request_script = $6
-      WHERE id = $7`,
+        post_request_script = $6,
+        updated_at = $7,
+        updated_by_user_id = $8
+      WHERE id = $9`,
       [
         trimmedName,
         JSON.stringify(variables),
@@ -481,6 +596,8 @@ export class PostgresDatabase implements IDatabase {
         JSON.stringify(auth),
         preRequestScript,
         postRequestScript,
+        updatedAt,
+        actingUserId,
         id
       ]
     );
@@ -488,6 +605,8 @@ export class PostgresDatabase implements IDatabase {
     if ((result.rowCount ?? 0) === 0) {
       throw new Error('Collection not found');
     }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'collection', id);
 
     const selectResult = await this.query<CollectionSqlRow>(`${COLLECTION_SELECT} WHERE id = $1`, [
       id
@@ -504,8 +623,10 @@ export class PostgresDatabase implements IDatabase {
    * Deletes a collection and all of its requests and folders.
    *
    * @param id - Collection ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteCollection(id: string): Promise<void> {
+  async deleteCollection(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'collection', id);
     await this.query('DELETE FROM collections WHERE id = $1', [id]);
   }
 
@@ -521,17 +642,25 @@ export class PostgresDatabase implements IDatabase {
    * Creates a new environment with the given name.
    *
    * @param name - Display name for the environment.
+   * @param actingUserId - User performing the create action.
    */
-  async createEnvironment(name: string): Promise<EnvironmentRecord> {
+  async createEnvironment(name: string, actingUserId: string): Promise<EnvironmentRecord> {
     const trimmedName = trimRequiredName(name, 'Environment name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
 
     const result = await this.query<EnvironmentSqlRow>(
-      `INSERT INTO environments (id, name, variables, created_at)
-      VALUES ($1, $2, '[]', $3)
-      RETURNING id, name, variables, created_at`,
-      [id, trimmedName, createdAt]
+      `INSERT INTO environments (
+        id,
+        name,
+        variables,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES ($1, $2, '[]', $3, $4, $5, $6)
+      RETURNING ${ENVIRONMENT_SELECT_COLUMNS}`,
+      [id, trimmedName, now, now, actingUserId, actingUserId]
     );
 
     const row = result.rows[0];
@@ -539,26 +668,39 @@ export class PostgresDatabase implements IDatabase {
       throw new Error('Environment not found after insert');
     }
 
+    await this.recordAuditEntry(actingUserId, 'create', 'environment', id);
+
     return mapEnvironmentSqlRow(row);
   }
 
   /**
    * Updates an environment's name and variables.
+   *
+   * @param actingUserId - User performing the update action.
    */
   async updateEnvironment(
     id: string,
     name: string,
-    variables: Variable[]
+    variables: Variable[],
+    actingUserId: string
   ): Promise<EnvironmentRecord> {
     const trimmedName = trimRequiredName(name, 'Environment name');
+    const updatedAt = new Date();
     const result = await this.query(
-      'UPDATE environments SET name = $1, variables = $2 WHERE id = $3',
-      [trimmedName, JSON.stringify(variables), id]
+      `UPDATE environments
+      SET name = $1,
+        variables = $2,
+        updated_at = $3,
+        updated_by_user_id = $4
+      WHERE id = $5`,
+      [trimmedName, JSON.stringify(variables), updatedAt, actingUserId, id]
     );
 
     if ((result.rowCount ?? 0) === 0) {
       throw new Error('Environment not found');
     }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'environment', id);
 
     const selectResult = await this.query<EnvironmentSqlRow>(
       `${ENVIRONMENT_SELECT} WHERE id = $1`,
@@ -576,8 +718,10 @@ export class PostgresDatabase implements IDatabase {
    * Deletes an environment.
    *
    * @param id - Environment ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteEnvironment(id: string): Promise<void> {
+  async deleteEnvironment(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'environment', id);
     await this.query('DELETE FROM environments WHERE id = $1', [id]);
   }
 
@@ -588,7 +732,7 @@ export class PostgresDatabase implements IDatabase {
    */
   async listRequests(collectionId: string): Promise<SavedRequestRecord[]> {
     const result = await this.query<RequestSqlRow>(
-      'SELECT * FROM requests WHERE collection_id = $1 ORDER BY sort_order ASC, name ASC',
+      `${REQUEST_SELECT} WHERE collection_id = $1 ORDER BY sort_order ASC, name ASC`,
       [collectionId]
     );
     return result.rows.map(mapRequestSqlRow);
@@ -600,9 +744,7 @@ export class PostgresDatabase implements IDatabase {
    * @param id - Request identifier to look up.
    */
   async findRequestById(id: string): Promise<SavedRequestRecord | null> {
-    const result = await this.query<RequestSqlRow>('SELECT * FROM requests WHERE id = $1 LIMIT 1', [
-      id
-    ]);
+    const result = await this.query<RequestSqlRow>(`${REQUEST_SELECT} WHERE id = $1 LIMIT 1`, [id]);
     const row = result.rows[0];
     return row ? mapRequestSqlRow(row) : null;
   }
@@ -611,8 +753,9 @@ export class PostgresDatabase implements IDatabase {
    * Inserts a new request or updates an existing one.
    *
    * @param input - Request fields to persist.
+   * @param actingUserId - User performing the save action.
    */
-  async saveRequest(input: SaveRequestInput): Promise<SavedRequestRecord> {
+  async saveRequest(input: SaveRequestInput, actingUserId: string): Promise<SavedRequestRecord> {
     const trimmedName = trimRequiredName(input.name, 'Request name');
     const headers = JSON.stringify(input.headers);
     const params = JSON.stringify(input.params);
@@ -647,8 +790,9 @@ export class PostgresDatabase implements IDatabase {
           pre_request_script = $11,
           post_request_script = $12,
           comment = $13,
-          updated_at = $14
-        WHERE id = $15`,
+          updated_at = $14,
+          updated_by_user_id = $15
+        WHERE id = $16`,
         [
           input.collectionId,
           folderId,
@@ -664,15 +808,17 @@ export class PostgresDatabase implements IDatabase {
           input.postRequestScript,
           input.comment,
           now,
+          actingUserId,
           input.id
         ]
       );
 
       if ((result.rowCount ?? 0) > 0) {
-        const selectResult = await this.query<RequestSqlRow>(
-          'SELECT * FROM requests WHERE id = $1',
-          [input.id]
-        );
+        await this.recordAuditEntry(actingUserId, 'update', 'request', input.id);
+
+        const selectResult = await this.query<RequestSqlRow>(`${REQUEST_SELECT} WHERE id = $1`, [
+          input.id
+        ]);
         const row = selectResult.rows[0];
         if (row) {
           return mapRequestSqlRow(row);
@@ -707,9 +853,11 @@ export class PostgresDatabase implements IDatabase {
         comment,
         sort_order,
         created_at,
-        updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-      RETURNING *`,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      RETURNING ${REQUEST_SELECT_COLUMNS}`,
       [
         id,
         input.collectionId,
@@ -727,7 +875,9 @@ export class PostgresDatabase implements IDatabase {
         input.comment,
         maxOrder + 1,
         now,
-        now
+        now,
+        actingUserId,
+        actingUserId
       ]
     );
 
@@ -736,6 +886,8 @@ export class PostgresDatabase implements IDatabase {
       throw new Error('Request not found after insert');
     }
 
+    await this.recordAuditEntry(actingUserId, 'create', 'request', id);
+
     return mapRequestSqlRow(row);
   }
 
@@ -743,8 +895,10 @@ export class PostgresDatabase implements IDatabase {
    * Deletes a saved request by ID.
    *
    * @param id - Request ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteRequest(id: string): Promise<void> {
+  async deleteRequest(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'request', id);
     await this.query('DELETE FROM requests WHERE id = $1', [id]);
   }
 
@@ -755,7 +909,7 @@ export class PostgresDatabase implements IDatabase {
    */
   async listFolders(collectionId: string): Promise<FolderRecord[]> {
     const result = await this.query<FolderSqlRow>(
-      'SELECT * FROM folders WHERE collection_id = $1 ORDER BY sort_order ASC, name ASC',
+      `${FOLDER_SELECT} WHERE collection_id = $1 ORDER BY sort_order ASC, name ASC`,
       [collectionId]
     );
     return result.rows.map(mapFolderSqlRow);
@@ -767,9 +921,7 @@ export class PostgresDatabase implements IDatabase {
    * @param id - Folder identifier to look up.
    */
   async findFolderById(id: string): Promise<FolderRecord | null> {
-    const result = await this.query<FolderSqlRow>('SELECT * FROM folders WHERE id = $1 LIMIT 1', [
-      id
-    ]);
+    const result = await this.query<FolderSqlRow>(`${FOLDER_SELECT} WHERE id = $1 LIMIT 1`, [id]);
     const row = result.rows[0];
     return row ? mapFolderSqlRow(row) : null;
   }
@@ -779,11 +931,16 @@ export class PostgresDatabase implements IDatabase {
    *
    * @param collectionId - Collection to add the folder to.
    * @param name - Display name for the folder.
+   * @param actingUserId - User performing the create action.
    */
-  async createFolder(collectionId: string, name: string): Promise<FolderRecord> {
+  async createFolder(
+    collectionId: string,
+    name: string,
+    actingUserId: string
+  ): Promise<FolderRecord> {
     const trimmedName = trimRequiredName(name, 'Folder name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
     const maxResult = await this.query<{ max_order: number | null }>(
       'SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM folders WHERE collection_id = $1',
       [collectionId]
@@ -791,16 +948,26 @@ export class PostgresDatabase implements IDatabase {
     const maxOrder = maxResult.rows[0]?.max_order ?? -1;
 
     const result = await this.query<FolderSqlRow>(
-      `INSERT INTO folders (id, collection_id, name, sort_order, created_at)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *`,
-      [id, collectionId, trimmedName, maxOrder + 1, createdAt]
+      `INSERT INTO folders (
+        id,
+        collection_id,
+        name,
+        sort_order,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING ${FOLDER_SELECT_COLUMNS}`,
+      [id, collectionId, trimmedName, maxOrder + 1, now, now, actingUserId, actingUserId]
     );
 
     const row = result.rows[0];
     if (!row) {
       throw new Error('Folder not found after insert');
     }
+
+    await this.recordAuditEntry(actingUserId, 'create', 'folder', id);
 
     return mapFolderSqlRow(row);
   }
@@ -810,17 +977,26 @@ export class PostgresDatabase implements IDatabase {
    *
    * @param id - Folder ID to rename.
    * @param name - New display name.
+   * @param actingUserId - User performing the rename action.
    */
-  async renameFolder(id: string, name: string): Promise<FolderRecord> {
+  async renameFolder(id: string, name: string, actingUserId: string): Promise<FolderRecord> {
     const trimmedName = trimRequiredName(name, 'Folder name');
+    const updatedAt = new Date();
     const result = await this.query<FolderSqlRow>(
-      'UPDATE folders SET name = $1 WHERE id = $2 RETURNING *',
-      [trimmedName, id]
+      `UPDATE folders
+      SET name = $1,
+        updated_at = $2,
+        updated_by_user_id = $3
+      WHERE id = $4
+      RETURNING ${FOLDER_SELECT_COLUMNS}`,
+      [trimmedName, updatedAt, actingUserId, id]
     );
     const row = result.rows[0];
     if (!row) {
       throw new Error('Folder not found');
     }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'folder', id);
 
     return mapFolderSqlRow(row);
   }
@@ -829,8 +1005,11 @@ export class PostgresDatabase implements IDatabase {
    * Deletes a folder and all requests inside it.
    *
    * @param id - Folder ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteFolder(id: string): Promise<void> {
+  async deleteFolder(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'folder', id);
+
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
@@ -850,15 +1029,25 @@ export class PostgresDatabase implements IDatabase {
    *
    * @param collectionId - Collection containing the folders.
    * @param orderedFolderIds - Folder IDs in desired order.
+   * @param actingUserId - User performing the reorder action.
    */
-  async reorderFolders(collectionId: string, orderedFolderIds: string[]): Promise<void> {
+  async reorderFolders(
+    collectionId: string,
+    orderedFolderIds: string[],
+    actingUserId: string
+  ): Promise<void> {
     const client = await this.requirePool().connect();
+    const updatedAt = new Date();
     try {
       await client.query('BEGIN');
       for (let index = 0; index < orderedFolderIds.length; index++) {
         await client.query(
-          'UPDATE folders SET sort_order = $1 WHERE id = $2 AND collection_id = $3',
-          [index, orderedFolderIds[index], collectionId]
+          `UPDATE folders
+          SET sort_order = $1,
+            updated_at = $2,
+            updated_by_user_id = $3
+          WHERE id = $4 AND collection_id = $5`,
+          [index, updatedAt, actingUserId, orderedFolderIds[index], collectionId]
         );
       }
       await client.query('COMMIT');
@@ -868,23 +1057,36 @@ export class PostgresDatabase implements IDatabase {
     } finally {
       client.release();
     }
+
+    await this.recordAuditEntry(actingUserId, 'reorder', 'folder', collectionId, {
+      orderedFolderIds
+    });
   }
 
   /**
    * Reorders requests within a folder or at collection root.
+   *
+   * @param actingUserId - User performing the reorder action.
    */
   async reorderRequests(
     collectionId: string,
     folderId: string | null,
-    orderedRequestIds: string[]
+    orderedRequestIds: string[],
+    actingUserId: string
   ): Promise<void> {
     const client = await this.requirePool().connect();
+    const updatedAt = new Date();
     try {
       await client.query('BEGIN');
       for (let index = 0; index < orderedRequestIds.length; index++) {
         await client.query(
-          'UPDATE requests SET sort_order = $1, folder_id = $2 WHERE id = $3 AND collection_id = $4',
-          [index, folderId, orderedRequestIds[index], collectionId]
+          `UPDATE requests
+          SET sort_order = $1,
+            folder_id = $2,
+            updated_at = $3,
+            updated_by_user_id = $4
+          WHERE id = $5 AND collection_id = $6`,
+          [index, folderId, updatedAt, actingUserId, orderedRequestIds[index], collectionId]
         );
       }
       await client.query('COMMIT');
@@ -894,13 +1096,26 @@ export class PostgresDatabase implements IDatabase {
     } finally {
       client.release();
     }
+
+    await this.recordAuditEntry(actingUserId, 'reorder', 'request', collectionId, {
+      folderId,
+      orderedRequestIds
+    });
   }
 
   /**
    * Moves a request to another folder or collection root at a given index.
+   *
+   * @param actingUserId - User performing the move action.
    */
-  async moveRequest(requestId: string, folderId: string | null, index: number): Promise<void> {
+  async moveRequest(
+    requestId: string,
+    folderId: string | null,
+    index: number,
+    actingUserId: string
+  ): Promise<void> {
     const client = await this.requirePool().connect();
+    const updatedAt = new Date();
 
     /**
      * Lists request ids in a container ordered for reindexing.
@@ -932,21 +1147,24 @@ export class PostgresDatabase implements IDatabase {
       orderedIds: string[]
     ): Promise<void> => {
       for (let sortIndex = 0; sortIndex < orderedIds.length; sortIndex++) {
-        await client.query('UPDATE requests SET sort_order = $1, folder_id = $2 WHERE id = $3', [
-          sortIndex,
-          targetFolderId,
-          orderedIds[sortIndex]
-        ]);
+        await client.query(
+          `UPDATE requests
+          SET sort_order = $1,
+            folder_id = $2,
+            updated_at = $3,
+            updated_by_user_id = $4
+          WHERE id = $5`,
+          [sortIndex, targetFolderId, updatedAt, actingUserId, orderedIds[sortIndex]]
+        );
       }
     };
 
     try {
       await client.query('BEGIN');
 
-      const requestResult = await client.query<RequestSqlRow>(
-        'SELECT * FROM requests WHERE id = $1',
-        [requestId]
-      );
+      const requestResult = await client.query<RequestSqlRow>(`${REQUEST_SELECT} WHERE id = $1`, [
+        requestId
+      ]);
       const requestRow = requestResult.rows[0];
       if (!requestRow) {
         throw new Error('Request not found');
@@ -993,6 +1211,11 @@ export class PostgresDatabase implements IDatabase {
     } finally {
       client.release();
     }
+
+    await this.recordAuditEntry(actingUserId, 'move', 'request', requestId, {
+      folderId,
+      index
+    });
   }
 
   /**
@@ -1007,6 +1230,98 @@ export class PostgresDatabase implements IDatabase {
     }
 
     return this.pool;
+  }
+
+  /**
+   * Ensures the internal system user exists and caches its identifier.
+   *
+   * Inserts directly rather than calling {@link createUser} to avoid recursion
+   * during migration bootstrap.
+   */
+  private async ensureSystemUser(): Promise<void> {
+    const existing = await this.findUserByName(SYSTEM_USER_NAME);
+    if (existing) {
+      this.systemUserId = existing.id;
+      return;
+    }
+
+    const id = randomUUID();
+    const now = new Date();
+    const input = createSystemUserInput();
+
+    await this.query(
+      `INSERT INTO users (
+        id,
+        name,
+        role,
+        collection_access,
+        environment_access,
+        created_at,
+        updated_at,
+        created_by_user_id,
+        updated_by_user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        id,
+        SYSTEM_USER_NAME,
+        input.role,
+        serializeAccessList(input.collectionAccess),
+        serializeAccessList(input.environmentAccess),
+        now,
+        now,
+        id,
+        id
+      ]
+    );
+
+    this.systemUserId = id;
+  }
+
+  /**
+   * Persists a single audit log entry for a mutating action.
+   *
+   * @param actingUserId - User performing the action.
+   * @param action - CRUD or structural action performed.
+   * @param entityType - Kind of entity affected.
+   * @param entityId - Identifier of the affected entity.
+   * @param metadata - Optional structured context for the action.
+   */
+  private async recordAuditEntry(
+    actingUserId: string,
+    action: AuditAction,
+    entityType: AuditEntityType,
+    entityId: string,
+    metadata?: Record<string, unknown> | null
+  ): Promise<void> {
+    const userName = await resolveActingUserName(
+      (userId) => this.findUserById(userId),
+      actingUserId
+    );
+    const id = randomUUID();
+    const now = new Date();
+
+    await this.query(
+      `INSERT INTO audit_log (
+        id,
+        user_id,
+        user_name,
+        action,
+        entity_type,
+        entity_id,
+        created_at,
+        metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        id,
+        actingUserId,
+        userName,
+        action,
+        entityType,
+        entityId,
+        now,
+        serializeAuditMetadata(metadata ?? null)
+      ]
+    );
   }
 
   /**

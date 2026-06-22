@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { createStubDatabase } from '#/db/stubDatabase.js';
 import { authHeader, createProtectedTestApp } from '#/server/routes/test/createTestApp.js';
+import { sampleAttribution } from '#/server/routes/test/sampleAttribution.js';
 
 const sampleEnvironment = {
   id: 'env-1',
   name: 'Production',
   variables: [],
-  createdAt: new Date('2026-01-02T00:00:00.000Z')
+  createdAt: new Date('2026-01-02T00:00:00.000Z'),
+  updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+  ...sampleAttribution
 };
 
 describe('environment routes', () => {
@@ -26,7 +29,8 @@ describe('environment routes', () => {
       environments: [
         {
           ...sampleEnvironment,
-          createdAt: sampleEnvironment.createdAt.toISOString()
+          createdAt: sampleEnvironment.createdAt.toISOString(),
+          updatedAt: sampleEnvironment.updatedAt.toISOString()
         }
       ]
     });
@@ -47,7 +51,7 @@ describe('environment routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(db.createEnvironment).toHaveBeenCalledWith('Production');
+    expect(db.createEnvironment).toHaveBeenCalledWith('Production', 'user-1');
     expect(response.json().id).toBe('env-1');
 
     await app.close();

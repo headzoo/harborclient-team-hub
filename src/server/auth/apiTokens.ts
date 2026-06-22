@@ -40,7 +40,9 @@ export function generateApiToken(
     tokenPrefix,
     createdAt,
     lastUsedAt: null,
-    revokedAt: null
+    revokedAt: null,
+    createdByUserId: null,
+    updatedByUserId: null
   };
 
   return { record, secret };

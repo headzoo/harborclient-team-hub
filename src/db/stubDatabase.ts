@@ -13,6 +13,8 @@ export function createStubDatabase(): Mocked<IDatabase> {
     connect: vi.fn(),
     disconnect: vi.fn(),
     migrate: vi.fn(),
+    getSystemUserId: vi.fn().mockReturnValue('system-user-id'),
+    listAuditLog: vi.fn().mockResolvedValue([]),
     createUser: vi.fn(),
     findUserById: vi.fn(),
     findUserByName: vi.fn(),

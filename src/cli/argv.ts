@@ -9,9 +9,7 @@
  * @returns Copy of argv with a script-following `--` removed when present.
  */
 export function normalizeCliArgv(argv: readonly string[]): string[] {
-  const scriptIndex = argv.findIndex(
-    (arg) => arg.endsWith('cli.ts') || arg.endsWith('cli.js')
-  );
+  const scriptIndex = argv.findIndex((arg) => arg.endsWith('cli.ts') || arg.endsWith('cli.js'));
   if (scriptIndex === -1) {
     return [...argv];
   }

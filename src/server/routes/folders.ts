@@ -92,7 +92,11 @@ export async function registerFolderRoutes(app: FastifyInstance, db: IDatabase):
           return;
         }
 
-        const folder = await db.createFolder(request.params.collectionId, request.body.name);
+        const folder = await db.createFolder(
+          request.params.collectionId,
+          request.body.name,
+          user.id
+        );
         return reply.send(serializeFolder(folder));
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -136,7 +140,7 @@ export async function registerFolderRoutes(app: FastifyInstance, db: IDatabase):
           return;
         }
 
-        const folder = await db.renameFolder(request.params.id, request.body.name);
+        const folder = await db.renameFolder(request.params.id, request.body.name, user.id);
         return reply.send(serializeFolder(folder));
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -178,7 +182,7 @@ export async function registerFolderRoutes(app: FastifyInstance, db: IDatabase):
           return;
         }
 
-        await db.deleteFolder(request.params.id);
+        await db.deleteFolder(request.params.id, user.id);
         return reply.code(204).send(null);
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -216,7 +220,11 @@ export async function registerFolderRoutes(app: FastifyInstance, db: IDatabase):
           return;
         }
 
-        await db.reorderFolders(request.params.collectionId, request.body.orderedFolderIds);
+        await db.reorderFolders(
+          request.params.collectionId,
+          request.body.orderedFolderIds,
+          user.id
+        );
         return reply.code(204).send(null);
       } catch (error) {
         if (handleDbError(reply, error)) {

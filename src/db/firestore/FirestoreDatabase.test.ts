@@ -24,7 +24,7 @@ const { FirestoreMock } = vi.hoisted(() => {
      *
      * @param config - Client settings passed to the Firestore constructor.
      */
-    constructor(public readonly config: unknown) { }
+    constructor(public readonly config: unknown) {}
   }
 
   return {
@@ -148,16 +148,21 @@ describe('FirestoreDatabase api tokens', () => {
     });
 
     await expect(
-      db.createApiToken({
-        userId: 'user-1',
-        id: 'id',
-        name: 'name',
-        tokenHash: 'hash',
-        tokenPrefix: 'prefix',
-        createdAt: new Date(),
-        lastUsedAt: null,
-        revokedAt: null
-      })
+      db.createApiToken(
+        {
+          userId: 'user-1',
+          id: 'id',
+          name: 'name',
+          tokenHash: 'hash',
+          tokenPrefix: 'prefix',
+          createdAt: new Date(),
+          lastUsedAt: null,
+          revokedAt: null,
+          createdByUserId: null,
+          updatedByUserId: null
+        },
+        'user-1'
+      )
     ).rejects.toThrow('Firestore database is not connected.');
   });
 });
@@ -180,7 +185,10 @@ describe('FirestoreDatabase collections', () => {
             },
             preRequestScript: '',
             postRequestScript: '',
-            createdAt: new Date('2026-01-01T00:00:00.000Z')
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+            createdByUserId: 'user-1',
+            updatedByUserId: 'user-1'
           })
         }
       ]
@@ -194,7 +202,10 @@ describe('FirestoreDatabase collections', () => {
         listCollections = vi.fn().mockResolvedValue([]);
         terminate = vi.fn().mockResolvedValue(undefined);
         collection = vi.fn().mockReturnValue({
-          doc: vi.fn().mockReturnValue({ set: setMock }),
+          doc: vi.fn().mockReturnValue({
+            set: setMock,
+            get: vi.fn().mockResolvedValue({ exists: false })
+          }),
           orderBy: vi.fn().mockReturnThis(),
           get: getMock
         });
@@ -204,7 +215,7 @@ describe('FirestoreDatabase collections', () => {
          *
          * @param config - Client settings passed to the Firestore constructor.
          */
-        constructor(public readonly config: unknown) { }
+        constructor(public readonly config: unknown) {}
       }
     );
 
@@ -214,11 +225,13 @@ describe('FirestoreDatabase collections', () => {
     });
 
     await db.connect();
-    const created = await db.createCollection('Shared API');
+    const created = await db.createCollection('Shared API', 'user-1');
     const listed = await db.listCollections();
 
     expect(created.name).toBe('Shared API');
-    expect(setMock).toHaveBeenCalledOnce();
+    expect(created.createdByUserId).toBe('user-1');
+    expect(created.updatedByUserId).toBe('user-1');
+    expect(setMock).toHaveBeenCalledTimes(2);
     expect(listed).toHaveLength(1);
     expect(listed[0]?.name).toBe('Shared API');
 

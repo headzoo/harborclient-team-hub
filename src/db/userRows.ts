@@ -38,6 +38,16 @@ export interface UserSqlRow {
    * Last update timestamp column.
    */
   updated_at: Date;
+
+  /**
+   * Creating user identifier column.
+   */
+  created_by_user_id: string | null;
+
+  /**
+   * Last updating user identifier column.
+   */
+  updated_by_user_id: string | null;
 }
 
 /**
@@ -84,7 +94,9 @@ export function mapUserSqlRow(row: UserSqlRow): UserRecord {
     collectionAccess: parseAccessList(row.collection_access),
     environmentAccess: parseAccessList(row.environment_access),
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    createdByUserId: row.created_by_user_id ?? null,
+    updatedByUserId: row.updated_by_user_id ?? null
   };
 }
 
@@ -97,3 +109,38 @@ export function mapUserSqlRow(row: UserSqlRow): UserRecord {
 export function serializeAccessList(access: string[]): string {
   return JSON.stringify(access);
 }
+
+/**
+ * Column list for SELECT queries against the users table.
+ */
+export const USER_SELECT_COLUMNS = `id, name, role, collection_access, environment_access, created_at, updated_at, created_by_user_id, updated_by_user_id`;
+
+/**
+ * Column list for SELECT queries against the collections table.
+ */
+export const COLLECTION_SELECT_COLUMNS = `id, name, variables, headers, auth, pre_request_script, post_request_script, created_at, updated_at, created_by_user_id, updated_by_user_id`;
+
+/**
+ * Column list for SELECT queries against the environments table.
+ */
+export const ENVIRONMENT_SELECT_COLUMNS = `id, name, variables, created_at, updated_at, created_by_user_id, updated_by_user_id`;
+
+/**
+ * Column list for SELECT queries against the folders table.
+ */
+export const FOLDER_SELECT_COLUMNS = `id, collection_id, name, sort_order, created_at, updated_at, created_by_user_id, updated_by_user_id`;
+
+/**
+ * Column list for SELECT queries against the requests table.
+ */
+export const REQUEST_SELECT_COLUMNS = `id, collection_id, folder_id, name, method, url, headers, params, auth, body, body_type, pre_request_script, post_request_script, comment, sort_order, created_at, updated_at, created_by_user_id, updated_by_user_id`;
+
+/**
+ * Column list for SELECT queries against the api_tokens table.
+ */
+export const API_TOKEN_SELECT_COLUMNS = `id, user_id, name, token_hash, token_prefix, created_at, last_used_at, revoked_at, created_by_user_id, updated_by_user_id`;
+
+/**
+ * Column list for SELECT queries against the audit_log table.
+ */
+export const AUDIT_LOG_SELECT_COLUMNS = `id, user_id, user_name, action, entity_type, entity_id, created_at, metadata`;

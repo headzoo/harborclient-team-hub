@@ -6,12 +6,18 @@ import { DEFAULT_AUTH_JSON } from '#/db/types.js';
 export const API_TOKENS_MIGRATION_SQL = `
 CREATE TABLE IF NOT EXISTS api_tokens (
   id VARCHAR(36) PRIMARY KEY,
+  user_id VARCHAR(36) NULL,
   name VARCHAR(255) NOT NULL,
   token_hash CHAR(64) NOT NULL UNIQUE,
   token_prefix VARCHAR(255) NOT NULL,
   created_at DATETIME NOT NULL,
   last_used_at DATETIME NULL,
-  revoked_at DATETIME NULL
+  revoked_at DATETIME NULL,
+  created_by_user_id VARCHAR(36) NULL,
+  updated_by_user_id VARCHAR(36) NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 )
 `.trim();
 
@@ -27,7 +33,12 @@ CREATE TABLE IF NOT EXISTS collections (
   auth LONGTEXT NOT NULL,
   pre_request_script LONGTEXT NOT NULL,
   post_request_script LONGTEXT NOT NULL,
-  created_at DATETIME NOT NULL
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  created_by_user_id VARCHAR(36) NULL,
+  updated_by_user_id VARCHAR(36) NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 )
 `.trim();
 
@@ -39,7 +50,12 @@ CREATE TABLE IF NOT EXISTS environments (
   id VARCHAR(36) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   variables LONGTEXT NOT NULL,
-  created_at DATETIME NOT NULL
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  created_by_user_id VARCHAR(36) NULL,
+  updated_by_user_id VARCHAR(36) NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 )
 `.trim();
 
@@ -53,7 +69,12 @@ CREATE TABLE IF NOT EXISTS folders (
   name VARCHAR(255) NOT NULL,
   sort_order INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL,
-  FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
+  updated_at DATETIME NOT NULL,
+  created_by_user_id VARCHAR(36) NULL,
+  updated_by_user_id VARCHAR(36) NULL,
+  FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 )
 `.trim();
 
@@ -79,8 +100,12 @@ CREATE TABLE IF NOT EXISTS requests (
   sort_order INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
+  created_by_user_id VARCHAR(36) NULL,
+  updated_by_user_id VARCHAR(36) NULL,
   FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
-  FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
+  FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 )
 `.trim();
 
@@ -95,7 +120,27 @@ CREATE TABLE IF NOT EXISTS users (
   collection_access LONGTEXT NOT NULL,
   environment_access LONGTEXT NOT NULL,
   created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
+  updated_at DATETIME NOT NULL,
+  created_by_user_id VARCHAR(36) NULL,
+  updated_by_user_id VARCHAR(36) NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+)
+`.trim();
+
+/**
+ * DDL for creating the audit_log table when absent.
+ */
+export const AUDIT_LOG_MIGRATION_SQL = `
+CREATE TABLE IF NOT EXISTS audit_log (
+  id VARCHAR(36) PRIMARY KEY,
+  user_id VARCHAR(36) NULL,
+  user_name VARCHAR(255) NULL,
+  action VARCHAR(16) NOT NULL,
+  entity_type VARCHAR(32) NOT NULL,
+  entity_id VARCHAR(36) NOT NULL,
+  created_at DATETIME NOT NULL,
+  metadata LONGTEXT NOT NULL
 )
 `.trim();
 
@@ -108,6 +153,84 @@ ALTER TABLE api_tokens
 `.trim();
 
 /**
+ * Adds user attribution columns to api_tokens when upgrading existing databases.
+ */
+export const API_TOKENS_ATTRIBUTION_MIGRATION_SQL = `
+ALTER TABLE api_tokens
+  ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS updated_by_user_id VARCHAR(36) NULL
+`.trim();
+
+/**
+ * Adds user attribution and updated_at to collections when upgrading existing databases.
+ */
+export const COLLECTIONS_ATTRIBUTION_MIGRATION_SQL = `
+ALTER TABLE collections
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NULL,
+  ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS updated_by_user_id VARCHAR(36) NULL
+`.trim();
+
+/**
+ * Adds user attribution and updated_at to environments when upgrading existing databases.
+ */
+export const ENVIRONMENTS_ATTRIBUTION_MIGRATION_SQL = `
+ALTER TABLE environments
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NULL,
+  ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS updated_by_user_id VARCHAR(36) NULL
+`.trim();
+
+/**
+ * Adds user attribution and updated_at to folders when upgrading existing databases.
+ */
+export const FOLDERS_ATTRIBUTION_MIGRATION_SQL = `
+ALTER TABLE folders
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NULL,
+  ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS updated_by_user_id VARCHAR(36) NULL
+`.trim();
+
+/**
+ * Adds user attribution columns to requests when upgrading existing databases.
+ */
+export const REQUESTS_ATTRIBUTION_MIGRATION_SQL = `
+ALTER TABLE requests
+  ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS updated_by_user_id VARCHAR(36) NULL
+`.trim();
+
+/**
+ * Adds user attribution columns to users when upgrading existing databases.
+ */
+export const USERS_ATTRIBUTION_MIGRATION_SQL = `
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS updated_by_user_id VARCHAR(36) NULL
+`.trim();
+
+/**
+ * Backfills updated_at on collections from created_at for upgraded databases.
+ */
+export const COLLECTIONS_BACKFILL_UPDATED_AT_SQL = `
+UPDATE collections SET updated_at = created_at WHERE updated_at IS NULL
+`.trim();
+
+/**
+ * Backfills updated_at on environments from created_at for upgraded databases.
+ */
+export const ENVIRONMENTS_BACKFILL_UPDATED_AT_SQL = `
+UPDATE environments SET updated_at = created_at WHERE updated_at IS NULL
+`.trim();
+
+/**
+ * Backfills updated_at on folders from created_at for upgraded databases.
+ */
+export const FOLDERS_BACKFILL_UPDATED_AT_SQL = `
+UPDATE folders SET updated_at = created_at WHERE updated_at IS NULL
+`.trim();
+
+/**
  * Default auth JSON for MySQL collection/request inserts.
  */
 export const MYSQL_DEFAULT_AUTH_JSON = DEFAULT_AUTH_JSON;
@@ -116,11 +239,21 @@ export const MYSQL_DEFAULT_AUTH_JSON = DEFAULT_AUTH_JSON;
  * Ordered MySQL migrations applied by {@link MysqlDatabase.migrate}.
  */
 export const MYSQL_MIGRATIONS = [
+  USERS_MIGRATION_SQL,
   API_TOKENS_MIGRATION_SQL,
   COLLECTIONS_MIGRATION_SQL,
   ENVIRONMENTS_MIGRATION_SQL,
   FOLDERS_MIGRATION_SQL,
   REQUESTS_MIGRATION_SQL,
-  USERS_MIGRATION_SQL,
-  API_TOKENS_USER_ID_MIGRATION_SQL
+  AUDIT_LOG_MIGRATION_SQL,
+  API_TOKENS_USER_ID_MIGRATION_SQL,
+  API_TOKENS_ATTRIBUTION_MIGRATION_SQL,
+  COLLECTIONS_ATTRIBUTION_MIGRATION_SQL,
+  ENVIRONMENTS_ATTRIBUTION_MIGRATION_SQL,
+  FOLDERS_ATTRIBUTION_MIGRATION_SQL,
+  REQUESTS_ATTRIBUTION_MIGRATION_SQL,
+  USERS_ATTRIBUTION_MIGRATION_SQL,
+  COLLECTIONS_BACKFILL_UPDATED_AT_SQL,
+  ENVIRONMENTS_BACKFILL_UPDATED_AT_SQL,
+  FOLDERS_BACKFILL_UPDATED_AT_SQL
 ];

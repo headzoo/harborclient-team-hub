@@ -10,6 +10,7 @@ import { DEFAULT_AUTH_JSON } from '#/db/types.js';
 describe('mapCollectionSqlRow', () => {
   it('parses JSON columns into typed fields', () => {
     const createdAt = new Date('2026-01-01T00:00:00.000Z');
+    const updatedAt = new Date('2026-01-02T00:00:00.000Z');
     const record = mapCollectionSqlRow({
       id: 'collection-1',
       name: 'API Tests',
@@ -20,7 +21,10 @@ describe('mapCollectionSqlRow', () => {
       auth: DEFAULT_AUTH_JSON,
       pre_request_script: 'console.log("pre")',
       post_request_script: '',
-      created_at: createdAt
+      created_at: createdAt,
+      updated_at: updatedAt,
+      created_by_user_id: 'user-1',
+      updated_by_user_id: 'user-1'
     });
 
     expect(record).toEqual({
@@ -35,7 +39,10 @@ describe('mapCollectionSqlRow', () => {
       },
       preRequestScript: 'console.log("pre")',
       postRequestScript: '',
-      createdAt
+      createdAt,
+      updatedAt,
+      createdByUserId: 'user-1',
+      updatedByUserId: 'user-1'
     });
   });
 });
@@ -43,20 +50,27 @@ describe('mapCollectionSqlRow', () => {
 describe('mapEnvironmentSqlRow', () => {
   it('maps environment rows with variables', () => {
     const createdAt = new Date('2026-01-02T00:00:00.000Z');
+    const updatedAt = new Date('2026-01-03T00:00:00.000Z');
     const record = mapEnvironmentSqlRow({
       id: 'env-1',
       name: 'Production',
       variables: JSON.stringify([
         { key: 'host', value: 'prod.example.com', defaultValue: '', share: false }
       ]),
-      created_at: createdAt
+      created_at: createdAt,
+      updated_at: updatedAt,
+      created_by_user_id: 'user-1',
+      updated_by_user_id: 'user-2'
     });
 
     expect(record).toEqual({
       id: 'env-1',
       name: 'Production',
       variables: [{ key: 'host', value: 'prod.example.com', defaultValue: '', share: false }],
-      createdAt
+      createdAt,
+      updatedAt,
+      createdByUserId: 'user-1',
+      updatedByUserId: 'user-2'
     });
   });
 });
@@ -64,12 +78,16 @@ describe('mapEnvironmentSqlRow', () => {
 describe('mapFolderSqlRow', () => {
   it('maps folder rows with collection id', () => {
     const createdAt = new Date('2026-01-03T00:00:00.000Z');
+    const updatedAt = new Date('2026-01-04T00:00:00.000Z');
     const record = mapFolderSqlRow({
       id: 'folder-1',
       collection_id: 'collection-1',
       name: 'Auth',
       sort_order: 2,
-      created_at: createdAt
+      created_at: createdAt,
+      updated_at: updatedAt,
+      created_by_user_id: null,
+      updated_by_user_id: 'user-1'
     });
 
     expect(record).toEqual({
@@ -77,7 +95,10 @@ describe('mapFolderSqlRow', () => {
       collectionId: 'collection-1',
       name: 'Auth',
       sortOrder: 2,
-      createdAt
+      createdAt,
+      updatedAt,
+      createdByUserId: null,
+      updatedByUserId: 'user-1'
     });
   });
 });
@@ -103,11 +124,14 @@ describe('mapRequestSqlRow', () => {
       comment: 'smoke test',
       sort_order: 0,
       created_at: createdAt,
-      updated_at: updatedAt
+      updated_at: updatedAt,
+      created_by_user_id: 'user-1',
+      updated_by_user_id: 'user-1'
     });
 
     expect(record.folderId).toBeNull();
     expect(record.comment).toBe('smoke test');
     expect(record.updatedAt).toEqual(updatedAt);
+    expect(record.createdByUserId).toBe('user-1');
   });
 });

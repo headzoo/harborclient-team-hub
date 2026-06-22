@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createStubDatabase } from '#/db/stubDatabase.js';
 import { defaultAuth } from '#/db/types.js';
 import { authHeader, createProtectedTestApp } from '#/server/routes/test/createTestApp.js';
+import { sampleAttribution } from '#/server/routes/test/sampleAttribution.js';
 
 const sampleRequest = {
   id: 'request-1',
@@ -20,7 +21,8 @@ const sampleRequest = {
   folderId: null,
   sortOrder: 0,
   createdAt: new Date('2026-01-04T00:00:00.000Z'),
-  updatedAt: new Date('2026-01-05T00:00:00.000Z')
+  updatedAt: new Date('2026-01-05T00:00:00.000Z'),
+  ...sampleAttribution
 };
 
 describe('request routes', () => {
@@ -53,7 +55,8 @@ describe('request routes', () => {
       expect.objectContaining({
         collectionId: 'collection-1',
         name: 'Get health'
-      })
+      }),
+      'user-1'
     );
 
     await app.close();
@@ -72,7 +75,7 @@ describe('request routes', () => {
     });
 
     expect(response.statusCode).toBe(204);
-    expect(db.deleteRequest).toHaveBeenCalledWith('request-1');
+    expect(db.deleteRequest).toHaveBeenCalledWith('request-1', 'user-1');
 
     await app.close();
   });

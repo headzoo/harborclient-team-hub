@@ -4,6 +4,24 @@ import { loadServerConfig } from '#/config/serverConfig.js';
 import { createDatabase } from '#/db/index.js';
 import type { CreateUserInput, UpdateUserInput, UserRole } from '#/db/types.js';
 import { generateApiToken } from '#/server/auth/apiTokens.js';
+import type { IDatabase } from '#/db/IDatabase.js';
+
+/**
+ * Ensures schema migrations ran and returns the internal system user id for CLI actions.
+ *
+ * @param db - Connected database instance.
+ * @returns Stable system user identifier.
+ * @throws {Error} When the system user cannot be provisioned.
+ */
+async function requireSystemUserId(db: IDatabase): Promise<string> {
+  await db.migrate();
+  const systemUserId = db.getSystemUserId();
+  if (!systemUserId) {
+    throw new Error('System user is not provisioned.');
+  }
+
+  return systemUserId;
+}
 
 export interface UserCommandOptions {
   /**
@@ -230,12 +248,16 @@ export async function userCreateCommand(options: UserCreateCommandOptions): Prom
   );
 
   await db.connect();
-  const user = await db.createUser({
-    name: options.name,
-    role: options.role,
-    collectionAccess: access.collectionAccess,
-    environmentAccess: access.environmentAccess
-  });
+  const actingUserId = await requireSystemUserId(db);
+  const user = await db.createUser(
+    {
+      name: options.name,
+      role: options.role,
+      collectionAccess: access.collectionAccess,
+      environmentAccess: access.environmentAccess
+    },
+    actingUserId
+  );
   await db.disconnect();
 
   console.log(`Created user "${user.name}" (${user.id}) with role ${user.role}.`);
@@ -295,6 +317,7 @@ export async function userUpdateCommand(options: UserUpdateCommandOptions): Prom
   const db = createDatabase(config.db);
 
   await db.connect();
+  const actingUserId = await requireSystemUserId(db);
   const existing = await db.findUserById(options.id);
   if (!existing) {
     await db.disconnect();
@@ -316,7 +339,7 @@ export async function userUpdateCommand(options: UserUpdateCommandOptions): Prom
     environmentAccess: access.environmentAccess
   };
 
-  const user = await db.updateUser(options.id, input);
+  const user = await db.updateUser(options.id, input, actingUserId);
   await db.disconnect();
 
   console.log(`Updated user "${user.name}" (${user.id}).`);
@@ -332,6 +355,7 @@ export async function userDeleteCommand(options: UserUpdateCommandOptions): Prom
   const db = createDatabase(config.db);
 
   await db.connect();
+  const actingUserId = await requireSystemUserId(db);
   const existing = await db.findUserById(options.id);
   if (!existing) {
     await db.disconnect();
@@ -339,7 +363,7 @@ export async function userDeleteCommand(options: UserUpdateCommandOptions): Prom
     return;
   }
 
-  await db.deleteUser(options.id);
+  await db.deleteUser(options.id, actingUserId);
   await db.disconnect();
 
   console.log(`Deleted user "${existing.name}" (${existing.id}).`);
@@ -357,6 +381,7 @@ export async function userTokenCreateCommand(
   const db = createDatabase(config.db);
 
   await db.connect();
+  const actingUserId = await requireSystemUserId(db);
   const user = await db.findUserById(options.user);
   if (!user) {
     await db.disconnect();
@@ -364,7 +389,7 @@ export async function userTokenCreateCommand(
   }
 
   const { record, secret } = generateApiToken(user.id, options.name);
-  await db.createApiToken(record);
+  await db.createApiToken(record, actingUserId);
   await db.disconnect();
 
   console.log(`Created API token "${record.name}" (${record.id}) for user "${user.name}".`);
@@ -417,7 +442,8 @@ export async function userTokenRevokeCommand(
   const db = createDatabase(config.db);
 
   await db.connect();
-  const revoked = await db.revokeApiToken(options.id);
+  const actingUserId = await requireSystemUserId(db);
+  const revoked = await db.revokeApiToken(options.id, actingUserId);
   await db.disconnect();
 
   if (revoked) {

@@ -82,7 +82,7 @@ export async function registerCollectionRoutes(app: FastifyInstance, db: IDataba
           return;
         }
 
-        const collection = await db.createCollection(request.body.name);
+        const collection = await db.createCollection(request.body.name, user.id);
         return reply.send(serializeCollection(collection));
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -128,7 +128,8 @@ export async function registerCollectionRoutes(app: FastifyInstance, db: IDataba
           request.body.headers,
           request.body.preRequestScript,
           request.body.postRequestScript,
-          request.body.auth
+          request.body.auth,
+          user.id
         );
         return reply.send(serializeCollection(collection));
       } catch (error) {
@@ -166,7 +167,7 @@ export async function registerCollectionRoutes(app: FastifyInstance, db: IDataba
           return;
         }
 
-        await db.deleteCollection(request.params.id);
+        await db.deleteCollection(request.params.id, user.id);
         return reply.code(204).send(null);
       } catch (error) {
         if (handleDbError(reply, error)) {

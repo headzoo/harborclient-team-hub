@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { Firestore, type DocumentReference } from '@google-cloud/firestore';
+import { Firestore, type DocumentReference, type Query } from '@google-cloud/firestore';
+import { resolveActingUserName } from '#/db/attribution.js';
+import { BOOTSTRAP_USER_NAME } from '#/db/bootstrapUsers.js';
 import {
   API_TOKENS_COLLECTION,
+  AUDIT_LOG_COLLECTION,
   COLLECTIONS_COLLECTION,
   ENVIRONMENTS_COLLECTION,
   FOLDERS_COLLECTION,
@@ -9,10 +12,11 @@ import {
   USERS_COLLECTION,
   WRITE_BATCH_LIMIT
 } from '#/db/firestore/const.js';
-import { BOOTSTRAP_USER_NAME } from '#/db/bootstrapUsers.js';
+import { createSystemUserInput, SYSTEM_USER_NAME } from '#/db/systemUsers.js';
 import { firestoreConfigSchema } from '#/db/firestore/schemas.js';
 import type {
   FirestoreApiTokenDocument,
+  FirestoreAuditLogDocument,
   FirestoreCollectionDocument,
   FirestoreDatabaseConfig,
   FirestoreEnvironmentDocument,
@@ -22,6 +26,7 @@ import type {
 } from '#/db/firestore/types.js';
 import {
   mapFirestoreApiToken,
+  mapFirestoreAuditLog,
   mapFirestoreCollection,
   mapFirestoreEnvironment,
   mapFirestoreFolder,
@@ -32,12 +37,16 @@ import type { IDatabase } from '#/db/IDatabase.js';
 import { trimRequiredName } from '#/db/trimRequiredName.js';
 import type {
   ApiTokenRecord,
+  AuditAction,
+  AuditEntityType,
+  AuditLogRecord,
   AuthConfig,
   CollectionRecord,
   CreateUserInput,
   EnvironmentRecord,
   FolderRecord,
   KeyValue,
+  ListAuditLogOptions,
   SaveRequestInput,
   SavedRequestRecord,
   UpdateUserInput,
@@ -57,11 +66,16 @@ export class FirestoreDatabase implements IDatabase {
   private client: Firestore | null = null;
 
   /**
+   * Cached identifier of the internal system user, when provisioned during migration.
+   */
+  private systemUserId: string | null = null;
+
+  /**
    * Creates a Firestore database instance from validated config.
    *
    * @param config - Parsed Firestore connection settings.
    */
-  constructor(private readonly config: FirestoreDatabaseConfig) { }
+  constructor(private readonly config: FirestoreDatabaseConfig) {}
 
   /**
    * Validates raw config and constructs a {@link FirestoreDatabase}.
@@ -113,32 +127,78 @@ export class FirestoreDatabase implements IDatabase {
   }
 
   /**
-   * Firestore uses schemaless documents; runs bootstrap migration for orphan tokens.
+   * Firestore uses schemaless documents; provisions the system user and migrates orphan tokens.
    */
   async migrate(): Promise<void> {
+    await this.ensureSystemUser();
     await this.migrateOrphanTokensToBootstrapUser();
+  }
+
+  /**
+   * Returns the stable identifier of the internal system user, when provisioned.
+   */
+  getSystemUserId(): string | null {
+    return this.systemUserId;
+  }
+
+  /**
+   * Lists audit log entries ordered newest-first with optional filters.
+   *
+   * @param options - Optional limit and filter criteria.
+   */
+  async listAuditLog(options: ListAuditLogOptions = {}): Promise<AuditLogRecord[]> {
+    const limit = options.limit ?? 100;
+    let query: Query = this.requireClient().collection(AUDIT_LOG_COLLECTION);
+
+    if (options.userId !== undefined) {
+      query = query.where('userId', '==', options.userId);
+    }
+
+    if (options.entityType !== undefined) {
+      query = query.where('entityType', '==', options.entityType);
+    }
+
+    if (options.entityId !== undefined) {
+      query = query.where('entityId', '==', options.entityId);
+    }
+
+    const snapshot = await query.orderBy('createdAt', 'desc').limit(limit).get();
+    return snapshot.docs.map((doc) =>
+      mapFirestoreAuditLog(doc.id, doc.data() as FirestoreAuditLogDocument)
+    );
   }
 
   /**
    * Creates a new user account with the given role and access lists.
    *
    * @param input - User fields to persist.
+   * @param actingUserId - User performing the create action.
    */
-  async createUser(input: CreateUserInput): Promise<UserRecord> {
+  async createUser(input: CreateUserInput, actingUserId: string): Promise<UserRecord> {
     const trimmedName = trimRequiredName(input.name, 'User name');
     const id = randomUUID();
     const now = new Date();
+    const attributionUserId = trimmedName === SYSTEM_USER_NAME ? id : actingUserId;
     const data: FirestoreUserDocument = {
       name: trimmedName,
       role: input.role,
       collectionAccess: input.collectionAccess,
       environmentAccess: input.environmentAccess,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      createdByUserId: attributionUserId,
+      updatedByUserId: attributionUserId
     };
 
     await this.requireClient().collection(USERS_COLLECTION).doc(id).set(data);
-    return mapFirestoreUser(id, data);
+    await this.recordAuditEntry(actingUserId, 'create', 'user', id);
+
+    const created = await this.findUserById(id);
+    if (!created) {
+      throw new Error('User not found after insert');
+    }
+
+    return created;
   }
 
   /**
@@ -190,8 +250,9 @@ export class FirestoreDatabase implements IDatabase {
    *
    * @param id - User identifier to update.
    * @param input - Partial fields to apply.
+   * @param actingUserId - User performing the update action.
    */
-  async updateUser(id: string, input: UpdateUserInput): Promise<UserRecord> {
+  async updateUser(id: string, input: UpdateUserInput, actingUserId: string): Promise<UserRecord> {
     const existing = await this.findUserById(id);
     if (!existing) {
       throw new Error('User not found');
@@ -209,8 +270,11 @@ export class FirestoreDatabase implements IDatabase {
       role,
       collectionAccess,
       environmentAccess,
-      updatedAt
+      updatedAt,
+      updatedByUserId: actingUserId
     });
+
+    await this.recordAuditEntry(actingUserId, 'update', 'user', id);
 
     const updated = await this.findUserById(id);
     if (!updated) {
@@ -224,8 +288,11 @@ export class FirestoreDatabase implements IDatabase {
    * Deletes a user account and revokes all of their API tokens.
    *
    * @param id - User identifier to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteUser(id: string): Promise<void> {
+  async deleteUser(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'user', id);
+
     const client = this.requireClient();
     const tokenSnapshot = await client
       .collection(API_TOKENS_COLLECTION)
@@ -261,14 +328,22 @@ export class FirestoreDatabase implements IDatabase {
       return;
     }
 
+    const systemUserId = this.getSystemUserId();
+    if (!systemUserId) {
+      throw new Error('System user is not provisioned');
+    }
+
     let bootstrapUser = await this.findUserByName(BOOTSTRAP_USER_NAME);
     if (!bootstrapUser) {
-      bootstrapUser = await this.createUser({
-        name: BOOTSTRAP_USER_NAME,
-        role: 'user',
-        collectionAccess: ['*'],
-        environmentAccess: ['*']
-      });
+      bootstrapUser = await this.createUser(
+        {
+          name: BOOTSTRAP_USER_NAME,
+          role: 'user',
+          collectionAccess: ['*'],
+          environmentAccess: ['*']
+        },
+        systemUserId
+      );
     }
 
     for (let index = 0; index < orphanDocs.length; index += WRITE_BATCH_LIMIT) {
@@ -285,8 +360,9 @@ export class FirestoreDatabase implements IDatabase {
    * Inserts a new API token document.
    *
    * @param record - Token metadata to persist.
+   * @param actingUserId - User performing the create action.
    */
-  async createApiToken(record: ApiTokenRecord): Promise<void> {
+  async createApiToken(record: ApiTokenRecord, actingUserId: string): Promise<void> {
     await this.requireClient().collection(API_TOKENS_COLLECTION).doc(record.id).set({
       userId: record.userId,
       name: record.name,
@@ -294,8 +370,12 @@ export class FirestoreDatabase implements IDatabase {
       tokenPrefix: record.tokenPrefix,
       createdAt: record.createdAt,
       lastUsedAt: record.lastUsedAt,
-      revokedAt: record.revokedAt
+      revokedAt: record.revokedAt,
+      createdByUserId: actingUserId,
+      updatedByUserId: actingUserId
     });
+
+    await this.recordAuditEntry(actingUserId, 'create', 'api_token', record.id);
   }
 
   /**
@@ -358,8 +438,9 @@ export class FirestoreDatabase implements IDatabase {
    * Soft-revokes an active token by id.
    *
    * @param id - Token identifier to revoke.
+   * @param actingUserId - User performing the revoke action.
    */
-  async revokeApiToken(id: string): Promise<boolean> {
+  async revokeApiToken(id: string, actingUserId: string): Promise<boolean> {
     const docRef = this.requireClient().collection(API_TOKENS_COLLECTION).doc(id);
     const snapshot = await docRef.get();
     if (!snapshot.exists) {
@@ -371,7 +452,8 @@ export class FirestoreDatabase implements IDatabase {
       return false;
     }
 
-    await docRef.update({ revokedAt: new Date() });
+    await docRef.update({ revokedAt: new Date(), updatedByUserId: actingUserId });
+    await this.recordAuditEntry(actingUserId, 'update', 'api_token', id);
     return true;
   }
 
@@ -406,11 +488,12 @@ export class FirestoreDatabase implements IDatabase {
    * Creates a new collection with the given name.
    *
    * @param name - Display name for the collection.
+   * @param actingUserId - User performing the create action.
    */
-  async createCollection(name: string): Promise<CollectionRecord> {
+  async createCollection(name: string, actingUserId: string): Promise<CollectionRecord> {
     const trimmedName = trimRequiredName(name, 'Collection name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
     const data: FirestoreCollectionDocument = {
       name: trimmedName,
       variables: [],
@@ -418,15 +501,21 @@ export class FirestoreDatabase implements IDatabase {
       auth: defaultAuth(),
       preRequestScript: '',
       postRequestScript: '',
-      createdAt
+      createdAt: now,
+      updatedAt: now,
+      createdByUserId: actingUserId,
+      updatedByUserId: actingUserId
     };
 
     await this.requireClient().collection(COLLECTIONS_COLLECTION).doc(id).set(data);
+    await this.recordAuditEntry(actingUserId, 'create', 'collection', id);
     return mapFirestoreCollection(id, data);
   }
 
   /**
    * Updates a collection's name, variables, headers, and scripts.
+   *
+   * @param actingUserId - User performing the update action.
    */
   async updateCollection(
     id: string,
@@ -435,9 +524,11 @@ export class FirestoreDatabase implements IDatabase {
     headers: KeyValue[],
     preRequestScript: string,
     postRequestScript: string,
-    auth: AuthConfig
+    auth: AuthConfig,
+    actingUserId: string
   ): Promise<CollectionRecord> {
     const trimmedName = trimRequiredName(name, 'Collection name');
+    const updatedAt = new Date();
     const docRef = this.requireClient().collection(COLLECTIONS_COLLECTION).doc(id);
     const snapshot = await docRef.get();
     if (!snapshot.exists) {
@@ -452,7 +543,9 @@ export class FirestoreDatabase implements IDatabase {
       headers,
       auth,
       preRequestScript,
-      postRequestScript
+      postRequestScript,
+      updatedAt,
+      updatedByUserId: actingUserId
     };
 
     await docRef.update({
@@ -461,9 +554,12 @@ export class FirestoreDatabase implements IDatabase {
       headers,
       auth,
       preRequestScript,
-      postRequestScript
+      postRequestScript,
+      updatedAt,
+      updatedByUserId: actingUserId
     });
 
+    await this.recordAuditEntry(actingUserId, 'update', 'collection', id);
     return mapFirestoreCollection(id, updated);
   }
 
@@ -471,8 +567,11 @@ export class FirestoreDatabase implements IDatabase {
    * Deletes a collection and all of its requests and folders.
    *
    * @param id - Collection ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteCollection(id: string): Promise<void> {
+  async deleteCollection(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'collection', id);
+
     const client = this.requireClient();
     const requestsSnap = await client
       .collection(REQUESTS_COLLECTION)
@@ -510,30 +609,39 @@ export class FirestoreDatabase implements IDatabase {
    * Creates a new environment with the given name.
    *
    * @param name - Display name for the environment.
+   * @param actingUserId - User performing the create action.
    */
-  async createEnvironment(name: string): Promise<EnvironmentRecord> {
+  async createEnvironment(name: string, actingUserId: string): Promise<EnvironmentRecord> {
     const trimmedName = trimRequiredName(name, 'Environment name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
     const data: FirestoreEnvironmentDocument = {
       name: trimmedName,
       variables: [],
-      createdAt
+      createdAt: now,
+      updatedAt: now,
+      createdByUserId: actingUserId,
+      updatedByUserId: actingUserId
     };
 
     await this.requireClient().collection(ENVIRONMENTS_COLLECTION).doc(id).set(data);
+    await this.recordAuditEntry(actingUserId, 'create', 'environment', id);
     return mapFirestoreEnvironment(id, data);
   }
 
   /**
    * Updates an environment's name and variables.
+   *
+   * @param actingUserId - User performing the update action.
    */
   async updateEnvironment(
     id: string,
     name: string,
-    variables: Variable[]
+    variables: Variable[],
+    actingUserId: string
   ): Promise<EnvironmentRecord> {
     const trimmedName = trimRequiredName(name, 'Environment name');
+    const updatedAt = new Date();
     const docRef = this.requireClient().collection(ENVIRONMENTS_COLLECTION).doc(id);
     const snapshot = await docRef.get();
     if (!snapshot.exists) {
@@ -544,10 +652,19 @@ export class FirestoreDatabase implements IDatabase {
     const updated: FirestoreEnvironmentDocument = {
       ...existing,
       name: trimmedName,
-      variables
+      variables,
+      updatedAt,
+      updatedByUserId: actingUserId
     };
 
-    await docRef.update({ name: trimmedName, variables });
+    await docRef.update({
+      name: trimmedName,
+      variables,
+      updatedAt,
+      updatedByUserId: actingUserId
+    });
+
+    await this.recordAuditEntry(actingUserId, 'update', 'environment', id);
     return mapFirestoreEnvironment(id, updated);
   }
 
@@ -555,8 +672,10 @@ export class FirestoreDatabase implements IDatabase {
    * Deletes an environment.
    *
    * @param id - Environment ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteEnvironment(id: string): Promise<void> {
+  async deleteEnvironment(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'environment', id);
     await this.requireClient().collection(ENVIRONMENTS_COLLECTION).doc(id).delete();
   }
 
@@ -600,8 +719,9 @@ export class FirestoreDatabase implements IDatabase {
    * Inserts a new request or updates an existing one.
    *
    * @param input - Request fields to persist.
+   * @param actingUserId - User performing the save action.
    */
-  async saveRequest(input: SaveRequestInput): Promise<SavedRequestRecord> {
+  async saveRequest(input: SaveRequestInput, actingUserId: string): Promise<SavedRequestRecord> {
     const trimmedName = trimRequiredName(input.name, 'Request name');
     const folderId = input.folderId ?? null;
     const now = new Date();
@@ -639,7 +759,8 @@ export class FirestoreDatabase implements IDatabase {
           preRequestScript: input.preRequestScript,
           postRequestScript: input.postRequestScript,
           comment: input.comment,
-          updatedAt: now
+          updatedAt: now,
+          updatedByUserId: actingUserId
         };
 
         await docRef.update({
@@ -656,9 +777,11 @@ export class FirestoreDatabase implements IDatabase {
           preRequestScript: input.preRequestScript,
           postRequestScript: input.postRequestScript,
           comment: input.comment,
-          updatedAt: now
+          updatedAt: now,
+          updatedByUserId: actingUserId
         });
 
+        await this.recordAuditEntry(actingUserId, 'update', 'request', input.id);
         return mapFirestoreRequest(input.id, updated);
       }
     }
@@ -684,10 +807,13 @@ export class FirestoreDatabase implements IDatabase {
       comment: input.comment,
       sortOrder: maxOrder + 1,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      createdByUserId: actingUserId,
+      updatedByUserId: actingUserId
     };
 
     await client.collection(REQUESTS_COLLECTION).doc(id).set(data);
+    await this.recordAuditEntry(actingUserId, 'create', 'request', id);
     return mapFirestoreRequest(id, data);
   }
 
@@ -695,8 +821,10 @@ export class FirestoreDatabase implements IDatabase {
    * Deletes a saved request by ID.
    *
    * @param id - Request ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteRequest(id: string): Promise<void> {
+  async deleteRequest(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'request', id);
     await this.requireClient().collection(REQUESTS_COLLECTION).doc(id).delete();
   }
 
@@ -741,21 +869,30 @@ export class FirestoreDatabase implements IDatabase {
    *
    * @param collectionId - Collection to add the folder to.
    * @param name - Display name for the folder.
+   * @param actingUserId - User performing the create action.
    */
-  async createFolder(collectionId: string, name: string): Promise<FolderRecord> {
+  async createFolder(
+    collectionId: string,
+    name: string,
+    actingUserId: string
+  ): Promise<FolderRecord> {
     const trimmedName = trimRequiredName(name, 'Folder name');
     const id = randomUUID();
-    const createdAt = new Date();
+    const now = new Date();
     const existingFolders = await this.listFolders(collectionId);
     const maxOrder = existingFolders.reduce((max, folder) => Math.max(max, folder.sortOrder), -1);
     const data: FirestoreFolderDocument = {
       collectionId,
       name: trimmedName,
       sortOrder: maxOrder + 1,
-      createdAt
+      createdAt: now,
+      updatedAt: now,
+      createdByUserId: actingUserId,
+      updatedByUserId: actingUserId
     };
 
     await this.requireClient().collection(FOLDERS_COLLECTION).doc(id).set(data);
+    await this.recordAuditEntry(actingUserId, 'create', 'folder', id);
     return mapFirestoreFolder(id, data);
   }
 
@@ -764,9 +901,11 @@ export class FirestoreDatabase implements IDatabase {
    *
    * @param id - Folder ID to rename.
    * @param name - New display name.
+   * @param actingUserId - User performing the rename action.
    */
-  async renameFolder(id: string, name: string): Promise<FolderRecord> {
+  async renameFolder(id: string, name: string, actingUserId: string): Promise<FolderRecord> {
     const trimmedName = trimRequiredName(name, 'Folder name');
+    const updatedAt = new Date();
     const docRef = this.requireClient().collection(FOLDERS_COLLECTION).doc(id);
     const snapshot = await docRef.get();
     if (!snapshot.exists) {
@@ -774,16 +913,25 @@ export class FirestoreDatabase implements IDatabase {
     }
 
     const existing = snapshot.data() as FirestoreFolderDocument;
-    await docRef.update({ name: trimmedName });
-    return mapFirestoreFolder(id, { ...existing, name: trimmedName });
+    await docRef.update({ name: trimmedName, updatedAt, updatedByUserId: actingUserId });
+    await this.recordAuditEntry(actingUserId, 'update', 'folder', id);
+    return mapFirestoreFolder(id, {
+      ...existing,
+      name: trimmedName,
+      updatedAt,
+      updatedByUserId: actingUserId
+    });
   }
 
   /**
    * Deletes a folder and all requests inside it.
    *
    * @param id - Folder ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  async deleteFolder(id: string): Promise<void> {
+  async deleteFolder(id: string, actingUserId: string): Promise<void> {
+    await this.recordAuditEntry(actingUserId, 'delete', 'folder', id);
+
     const client = this.requireClient();
     const requestsSnap = await client
       .collection(REQUESTS_COLLECTION)
@@ -803,43 +951,79 @@ export class FirestoreDatabase implements IDatabase {
    *
    * @param collectionId - Collection containing the folders.
    * @param orderedFolderIds - Folder IDs in desired order.
+   * @param actingUserId - User performing the reorder action.
    */
-  async reorderFolders(collectionId: string, orderedFolderIds: string[]): Promise<void> {
+  async reorderFolders(
+    collectionId: string,
+    orderedFolderIds: string[],
+    actingUserId: string
+  ): Promise<void> {
     const client = this.requireClient();
+    const updatedAt = new Date();
     const batch = client.batch();
 
     for (let index = 0; index < orderedFolderIds.length; index++) {
       const docRef = client.collection(FOLDERS_COLLECTION).doc(orderedFolderIds[index]);
-      batch.update(docRef, { sortOrder: index, collectionId });
+      batch.update(docRef, {
+        sortOrder: index,
+        collectionId,
+        updatedAt,
+        updatedByUserId: actingUserId
+      });
     }
 
     await batch.commit();
+    await this.recordAuditEntry(actingUserId, 'reorder', 'folder', collectionId, {
+      orderedFolderIds
+    });
   }
 
   /**
    * Reorders requests within a folder or at collection root.
+   *
+   * @param actingUserId - User performing the reorder action.
    */
   async reorderRequests(
     collectionId: string,
     folderId: string | null,
-    orderedRequestIds: string[]
+    orderedRequestIds: string[],
+    actingUserId: string
   ): Promise<void> {
     const client = this.requireClient();
+    const updatedAt = new Date();
     const batch = client.batch();
 
     for (let index = 0; index < orderedRequestIds.length; index++) {
       const docRef = client.collection(REQUESTS_COLLECTION).doc(orderedRequestIds[index]);
-      batch.update(docRef, { sortOrder: index, folderId, collectionId });
+      batch.update(docRef, {
+        sortOrder: index,
+        folderId,
+        collectionId,
+        updatedAt,
+        updatedByUserId: actingUserId
+      });
     }
 
     await batch.commit();
+    await this.recordAuditEntry(actingUserId, 'reorder', 'request', collectionId, {
+      folderId,
+      orderedRequestIds
+    });
   }
 
   /**
    * Moves a request to another folder or collection root at a given index.
+   *
+   * @param actingUserId - User performing the move action.
    */
-  async moveRequest(requestId: string, folderId: string | null, index: number): Promise<void> {
+  async moveRequest(
+    requestId: string,
+    folderId: string | null,
+    index: number,
+    actingUserId: string
+  ): Promise<void> {
     const client = this.requireClient();
+    const updatedAt = new Date();
     const requestSnap = await client.collection(REQUESTS_COLLECTION).doc(requestId).get();
     if (!requestSnap.exists) {
       throw new Error('Request not found');
@@ -896,7 +1080,12 @@ export class FirestoreDatabase implements IDatabase {
       const batch = client.batch();
       for (let sortIndex = 0; sortIndex < orderedIds.length; sortIndex++) {
         const docRef = client.collection(REQUESTS_COLLECTION).doc(orderedIds[sortIndex]);
-        batch.update(docRef, { sortOrder: sortIndex, folderId: targetFolderId });
+        batch.update(docRef, {
+          sortOrder: sortIndex,
+          folderId: targetFolderId,
+          updatedAt,
+          updatedByUserId: actingUserId
+        });
       }
       await batch.commit();
     };
@@ -905,6 +1094,10 @@ export class FirestoreDatabase implements IDatabase {
       const siblings = (await listInContainer(folderId)).filter((id) => id !== requestId);
       siblings.splice(index, 0, requestId);
       await reindexContainer(folderId, siblings);
+      await this.recordAuditEntry(actingUserId, 'move', 'request', requestId, {
+        folderId,
+        index
+      });
       return;
     }
 
@@ -914,6 +1107,11 @@ export class FirestoreDatabase implements IDatabase {
     const newIds = (await listInContainer(folderId)).filter((id) => id !== requestId);
     newIds.splice(index, 0, requestId);
     await reindexContainer(folderId, newIds);
+
+    await this.recordAuditEntry(actingUserId, 'move', 'request', requestId, {
+      folderId,
+      index
+    });
   }
 
   /**
@@ -931,6 +1129,73 @@ export class FirestoreDatabase implements IDatabase {
       }
       await batch.commit();
     }
+  }
+
+  /**
+   * Ensures the internal system user exists and caches its identifier.
+   *
+   * Inserts directly rather than calling {@link createUser} to avoid recursion
+   * during migration bootstrap.
+   */
+  private async ensureSystemUser(): Promise<void> {
+    const existing = await this.findUserByName(SYSTEM_USER_NAME);
+    if (existing) {
+      this.systemUserId = existing.id;
+      return;
+    }
+
+    const input = createSystemUserInput();
+    const id = randomUUID();
+    const now = new Date();
+    const trimmedName = trimRequiredName(input.name, 'User name');
+    const data: FirestoreUserDocument = {
+      name: trimmedName,
+      role: input.role,
+      collectionAccess: input.collectionAccess,
+      environmentAccess: input.environmentAccess,
+      createdAt: now,
+      updatedAt: now,
+      createdByUserId: id,
+      updatedByUserId: id
+    };
+
+    await this.requireClient().collection(USERS_COLLECTION).doc(id).set(data);
+    this.systemUserId = id;
+  }
+
+  /**
+   * Persists a single audit log entry for a mutating action.
+   *
+   * @param actingUserId - User performing the action.
+   * @param action - CRUD or structural action performed.
+   * @param entityType - Kind of entity affected.
+   * @param entityId - Identifier of the affected entity.
+   * @param metadata - Optional structured context for the action.
+   */
+  private async recordAuditEntry(
+    actingUserId: string,
+    action: AuditAction,
+    entityType: AuditEntityType,
+    entityId: string,
+    metadata?: Record<string, unknown> | null
+  ): Promise<void> {
+    const userName = await resolveActingUserName(
+      (userId) => this.findUserById(userId),
+      actingUserId
+    );
+    const id = randomUUID();
+    const now = new Date();
+    const data: FirestoreAuditLogDocument = {
+      userId: actingUserId,
+      userName,
+      action,
+      entityType,
+      entityId,
+      createdAt: now,
+      metadata: metadata ?? null
+    };
+
+    await this.requireClient().collection(AUDIT_LOG_COLLECTION).doc(id).set(data);
   }
 
   /**

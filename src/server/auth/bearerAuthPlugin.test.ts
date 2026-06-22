@@ -19,7 +19,9 @@ const sampleUser: UserRecord = {
   collectionAccess: ['*'],
   environmentAccess: ['*'],
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
-  updatedAt: new Date('2026-01-01T00:00:00.000Z')
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  createdByUserId: null,
+  updatedByUserId: null
 };
 
 const sampleRecord: ApiTokenRecord = {
@@ -30,7 +32,9 @@ const sampleRecord: ApiTokenRecord = {
   tokenPrefix: 'hbk_valid-',
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   lastUsedAt: null,
-  revokedAt: null
+  revokedAt: null,
+  createdByUserId: null,
+  updatedByUserId: null
 };
 
 /**

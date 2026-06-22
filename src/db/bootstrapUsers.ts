@@ -20,6 +20,8 @@ export function createBootstrapUserRecord(now: Date): UserRecord {
     collectionAccess: ['*'],
     environmentAccess: ['*'],
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    createdByUserId: null,
+    updatedByUserId: null
   };
 }

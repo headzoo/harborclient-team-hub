@@ -19,7 +19,9 @@ const baseUser: UserRecord = {
   collectionAccess: ['collection-a'],
   environmentAccess: ['env-a'],
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
-  updatedAt: new Date('2026-01-01T00:00:00.000Z')
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  createdByUserId: null,
+  updatedByUserId: null
 };
 
 const adminUser: UserRecord = {
@@ -46,7 +48,10 @@ const sampleCollections: CollectionRecord[] = [
     auth: { type: 'none', basic: { username: '', password: '' }, bearer: { token: '' } },
     preRequestScript: '',
     postRequestScript: '',
-    createdAt: new Date('2026-01-01T00:00:00.000Z')
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdByUserId: null,
+    updatedByUserId: null
   },
   {
     id: 'collection-b',
@@ -56,7 +61,10 @@ const sampleCollections: CollectionRecord[] = [
     auth: { type: 'none', basic: { username: '', password: '' }, bearer: { token: '' } },
     preRequestScript: '',
     postRequestScript: '',
-    createdAt: new Date('2026-01-01T00:00:00.000Z')
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdByUserId: null,
+    updatedByUserId: null
   }
 ];
 
@@ -65,13 +73,19 @@ const sampleEnvironments: EnvironmentRecord[] = [
     id: 'env-a',
     name: 'A',
     variables: [],
-    createdAt: new Date('2026-01-01T00:00:00.000Z')
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdByUserId: null,
+    updatedByUserId: null
   },
   {
     id: 'env-b',
     name: 'B',
     variables: [],
-    createdAt: new Date('2026-01-01T00:00:00.000Z')
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdByUserId: null,
+    updatedByUserId: null
   }
 ];
 

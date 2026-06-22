@@ -89,6 +89,21 @@ export interface CollectionSqlRow {
    * Creation timestamp column.
    */
   created_at: Date;
+
+  /**
+   * Last update timestamp column.
+   */
+  updated_at: Date;
+
+  /**
+   * Creating user identifier column.
+   */
+  created_by_user_id: string | null;
+
+  /**
+   * Last updating user identifier column.
+   */
+  updated_by_user_id: string | null;
 }
 
 /**
@@ -114,6 +129,21 @@ export interface EnvironmentSqlRow {
    * Creation timestamp column.
    */
   created_at: Date;
+
+  /**
+   * Last update timestamp column.
+   */
+  updated_at: Date;
+
+  /**
+   * Creating user identifier column.
+   */
+  created_by_user_id: string | null;
+
+  /**
+   * Last updating user identifier column.
+   */
+  updated_by_user_id: string | null;
 }
 
 /**
@@ -144,6 +174,21 @@ export interface FolderSqlRow {
    * Creation timestamp column.
    */
   created_at: Date;
+
+  /**
+   * Last update timestamp column.
+   */
+  updated_at: Date;
+
+  /**
+   * Creating user identifier column.
+   */
+  created_by_user_id: string | null;
+
+  /**
+   * Last updating user identifier column.
+   */
+  updated_by_user_id: string | null;
 }
 
 /**
@@ -234,6 +279,16 @@ export interface RequestSqlRow {
    * Last-updated timestamp column.
    */
   updated_at: Date;
+
+  /**
+   * Creating user identifier column.
+   */
+  created_by_user_id: string | null;
+
+  /**
+   * Last updating user identifier column.
+   */
+  updated_by_user_id: string | null;
 }
 
 /**
@@ -251,7 +306,10 @@ export function mapCollectionSqlRow(row: CollectionSqlRow): CollectionRecord {
     auth: readAuth(row.auth),
     preRequestScript: row.pre_request_script,
     postRequestScript: row.post_request_script,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.created_at,
+    createdByUserId: row.created_by_user_id ?? null,
+    updatedByUserId: row.updated_by_user_id ?? null
   };
 }
 
@@ -266,7 +324,10 @@ export function mapEnvironmentSqlRow(row: EnvironmentSqlRow): EnvironmentRecord 
     id: row.id,
     name: row.name,
     variables: readVariables(row.variables),
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.created_at,
+    createdByUserId: row.created_by_user_id ?? null,
+    updatedByUserId: row.updated_by_user_id ?? null
   };
 }
 
@@ -282,7 +343,10 @@ export function mapFolderSqlRow(row: FolderSqlRow): FolderRecord {
     collectionId: row.collection_id,
     name: row.name,
     sortOrder: row.sort_order,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? row.created_at,
+    createdByUserId: row.created_by_user_id ?? null,
+    updatedByUserId: row.updated_by_user_id ?? null
   };
 }
 
@@ -310,6 +374,8 @@ export function mapRequestSqlRow(row: RequestSqlRow): SavedRequestRecord {
     comment: row.comment,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    createdByUserId: row.created_by_user_id ?? null,
+    updatedByUserId: row.updated_by_user_id ?? null
   };
 }

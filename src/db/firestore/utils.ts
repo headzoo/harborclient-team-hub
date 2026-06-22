@@ -1,5 +1,7 @@
 import type {
   ApiTokenRecord,
+  AuditEntityType,
+  AuditLogRecord,
   CollectionRecord,
   EnvironmentRecord,
   FolderRecord,
@@ -8,12 +10,35 @@ import type {
 } from '#/db/types.js';
 import type {
   FirestoreApiTokenDocument,
+  FirestoreAuditLogDocument,
   FirestoreCollectionDocument,
   FirestoreEnvironmentDocument,
   FirestoreFolderDocument,
   FirestoreRequestDocument,
   FirestoreUserDocument
 } from '#/db/firestore/types.js';
+
+/**
+ * Parses a stored entity type string into a typed {@link AuditEntityType}.
+ *
+ * @param value - Entity type from storage.
+ * @returns Validated entity type.
+ * @throws {Error} When the stored entity type is not recognized.
+ */
+function parseAuditEntityType(value: string): AuditEntityType {
+  if (
+    value === 'user' ||
+    value === 'api_token' ||
+    value === 'collection' ||
+    value === 'environment' ||
+    value === 'folder' ||
+    value === 'request'
+  ) {
+    return value;
+  }
+
+  throw new Error(`Invalid audit entity type: ${value}`);
+}
 
 /**
  * Maps a Firestore document to the shared {@link ApiTokenRecord} shape.
@@ -35,7 +60,9 @@ export function mapFirestoreApiToken(id: string, data: FirestoreApiTokenDocument
     tokenPrefix: data.tokenPrefix,
     createdAt: data.createdAt,
     lastUsedAt: data.lastUsedAt,
-    revokedAt: data.revokedAt
+    revokedAt: data.revokedAt,
+    createdByUserId: data.createdByUserId ?? null,
+    updatedByUserId: data.updatedByUserId ?? null
   };
 }
 
@@ -54,7 +81,9 @@ export function mapFirestoreUser(id: string, data: FirestoreUserDocument): UserR
     collectionAccess: data.collectionAccess,
     environmentAccess: data.environmentAccess,
     createdAt: data.createdAt,
-    updatedAt: data.updatedAt
+    updatedAt: data.updatedAt,
+    createdByUserId: data.createdByUserId ?? null,
+    updatedByUserId: data.updatedByUserId ?? null
   };
 }
 
@@ -77,7 +106,10 @@ export function mapFirestoreCollection(
     auth: data.auth,
     preRequestScript: data.preRequestScript,
     postRequestScript: data.postRequestScript,
-    createdAt: data.createdAt
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt ?? data.createdAt,
+    createdByUserId: data.createdByUserId ?? null,
+    updatedByUserId: data.updatedByUserId ?? null
   };
 }
 
@@ -96,7 +128,10 @@ export function mapFirestoreEnvironment(
     id,
     name: data.name,
     variables: data.variables,
-    createdAt: data.createdAt
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt ?? data.createdAt,
+    createdByUserId: data.createdByUserId ?? null,
+    updatedByUserId: data.updatedByUserId ?? null
   };
 }
 
@@ -113,7 +148,10 @@ export function mapFirestoreFolder(id: string, data: FirestoreFolderDocument): F
     collectionId: data.collectionId,
     name: data.name,
     sortOrder: data.sortOrder,
-    createdAt: data.createdAt
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt ?? data.createdAt,
+    createdByUserId: data.createdByUserId ?? null,
+    updatedByUserId: data.updatedByUserId ?? null
   };
 }
 
@@ -145,6 +183,45 @@ export function mapFirestoreRequest(
     comment: data.comment,
     sortOrder: data.sortOrder,
     createdAt: data.createdAt,
-    updatedAt: data.updatedAt
+    updatedAt: data.updatedAt,
+    createdByUserId: data.createdByUserId ?? null,
+    updatedByUserId: data.updatedByUserId ?? null
+  };
+}
+
+/**
+ * Maps a Firestore document to the shared {@link AuditLogRecord} shape.
+ *
+ * @param id - Document identifier.
+ * @param data - Stored audit log fields.
+ * @returns Normalized audit log record for application code.
+ */
+export function mapFirestoreAuditLog(id: string, data: FirestoreAuditLogDocument): AuditLogRecord {
+  return {
+    id,
+    userId: data.userId,
+    userName: data.userName,
+    action: data.action,
+    entityType: parseAuditEntityType(data.entityType),
+    entityId: data.entityId,
+    createdAt: data.createdAt,
+    metadata: data.metadata
+  };
+}
+
+/**
+ * Returns nullable attribution fields with defaults for legacy Firestore documents.
+ *
+ * @param createdByUserId - Stored creating user id, if any.
+ * @param updatedByUserId - Stored updating user id, if any.
+ * @returns Normalized attribution pair.
+ */
+export function normalizeAttributionFields(
+  createdByUserId: string | null | undefined,
+  updatedByUserId: string | null | undefined
+): { createdByUserId: string | null; updatedByUserId: string | null } {
+  return {
+    createdByUserId: createdByUserId ?? null,
+    updatedByUserId: updatedByUserId ?? null
   };
 }

@@ -43,6 +43,16 @@ export interface ApiTokenSqlRow {
    * Revocation timestamp column, if any.
    */
   revoked_at: Date | null;
+
+  /**
+   * Creating user identifier column.
+   */
+  created_by_user_id: string | null;
+
+  /**
+   * Last updating user identifier column.
+   */
+  updated_by_user_id: string | null;
 }
 
 /**
@@ -64,6 +74,8 @@ export function mapApiTokenSqlRow(row: ApiTokenSqlRow): ApiTokenRecord {
     tokenPrefix: row.token_prefix,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
-    revokedAt: row.revoked_at
+    revokedAt: row.revoked_at,
+    createdByUserId: row.created_by_user_id ?? null,
+    updatedByUserId: row.updated_by_user_id ?? null
   };
 }

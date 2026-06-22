@@ -94,21 +94,24 @@ export async function registerRequestRoutes(app: FastifyInstance, db: IDatabase)
           return;
         }
 
-        const savedRequest = await db.saveRequest({
-          collectionId: request.params.collectionId,
-          name: request.body.name,
-          method: request.body.method,
-          url: request.body.url,
-          headers: request.body.headers,
-          params: request.body.params,
-          auth: request.body.auth,
-          body: request.body.body,
-          bodyType: request.body.bodyType,
-          preRequestScript: request.body.preRequestScript,
-          postRequestScript: request.body.postRequestScript,
-          comment: request.body.comment,
-          folderId: request.body.folderId ?? null
-        });
+        const savedRequest = await db.saveRequest(
+          {
+            collectionId: request.params.collectionId,
+            name: request.body.name,
+            method: request.body.method,
+            url: request.body.url,
+            headers: request.body.headers,
+            params: request.body.params,
+            auth: request.body.auth,
+            body: request.body.body,
+            bodyType: request.body.bodyType,
+            preRequestScript: request.body.preRequestScript,
+            postRequestScript: request.body.postRequestScript,
+            comment: request.body.comment,
+            folderId: request.body.folderId ?? null
+          },
+          user.id
+        );
         return reply.send(serializeSavedRequest(savedRequest));
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -147,22 +150,25 @@ export async function registerRequestRoutes(app: FastifyInstance, db: IDatabase)
           return;
         }
 
-        const savedRequest = await db.saveRequest({
-          id: request.params.id,
-          collectionId: request.body.collectionId,
-          name: request.body.name,
-          method: request.body.method,
-          url: request.body.url,
-          headers: request.body.headers,
-          params: request.body.params,
-          auth: request.body.auth,
-          body: request.body.body,
-          bodyType: request.body.bodyType,
-          preRequestScript: request.body.preRequestScript,
-          postRequestScript: request.body.postRequestScript,
-          comment: request.body.comment,
-          folderId: request.body.folderId ?? null
-        });
+        const savedRequest = await db.saveRequest(
+          {
+            id: request.params.id,
+            collectionId: request.body.collectionId,
+            name: request.body.name,
+            method: request.body.method,
+            url: request.body.url,
+            headers: request.body.headers,
+            params: request.body.params,
+            auth: request.body.auth,
+            body: request.body.body,
+            bodyType: request.body.bodyType,
+            preRequestScript: request.body.preRequestScript,
+            postRequestScript: request.body.postRequestScript,
+            comment: request.body.comment,
+            folderId: request.body.folderId ?? null
+          },
+          user.id
+        );
         return reply.send(serializeSavedRequest(savedRequest));
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -204,7 +210,7 @@ export async function registerRequestRoutes(app: FastifyInstance, db: IDatabase)
           return;
         }
 
-        await db.deleteRequest(request.params.id);
+        await db.deleteRequest(request.params.id, user.id);
         return reply.code(204).send(null);
       } catch (error) {
         if (handleDbError(reply, error)) {
@@ -245,7 +251,8 @@ export async function registerRequestRoutes(app: FastifyInstance, db: IDatabase)
         await db.reorderRequests(
           request.params.collectionId,
           request.body.folderId,
-          request.body.orderedRequestIds
+          request.body.orderedRequestIds,
+          user.id
         );
         return reply.code(204).send(null);
       } catch (error) {
@@ -289,7 +296,7 @@ export async function registerRequestRoutes(app: FastifyInstance, db: IDatabase)
           return;
         }
 
-        await db.moveRequest(request.params.id, request.body.folderId, request.body.index);
+        await db.moveRequest(request.params.id, request.body.folderId, request.body.index, user.id);
         return reply.code(204).send(null);
       } catch (error) {
         if (handleDbError(reply, error)) {

@@ -11,6 +11,7 @@ import { hashToken } from '#/server/auth/apiTokens.js';
 import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
 import { createStubThrottleStore } from '#/server/auth/throttle/stubThrottleStore.js';
 import { registerProtectedRoutes } from '#/server/routes/index.js';
+import { sampleAttribution } from '#/server/routes/test/sampleAttribution.js';
 
 export const validBearerToken = 'hbk_valid-token';
 
@@ -24,7 +25,8 @@ export const sampleUserRecord: UserRecord = {
   collectionAccess: ['*'],
   environmentAccess: ['*'],
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
-  updatedAt: new Date('2026-01-01T00:00:00.000Z')
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  ...sampleAttribution
 };
 
 /**
@@ -38,7 +40,8 @@ export const sampleApiTokenRecord: ApiTokenRecord = {
   tokenPrefix: 'hbk_valid-',
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   lastUsedAt: null,
-  revokedAt: null
+  revokedAt: null,
+  ...sampleAttribution
 };
 
 /**

@@ -1,10 +1,12 @@
 import type {
+  AuditLogRecord,
   AuthConfig,
   CollectionRecord,
   CreateUserInput,
   EnvironmentRecord,
   FolderRecord,
   KeyValue,
+  ListAuditLogOptions,
   SaveRequestInput,
   SavedRequestRecord,
   UpdateUserInput,
@@ -35,12 +37,25 @@ export interface IDatabase {
   migrate(): Promise<void>;
 
   /**
+   * Returns the stable identifier of the internal system user, when provisioned.
+   */
+  getSystemUserId(): string | null;
+
+  /**
+   * Lists audit log entries ordered newest-first with optional filters.
+   *
+   * @param options - Optional limit and filter criteria.
+   */
+  listAuditLog(options?: ListAuditLogOptions): Promise<AuditLogRecord[]>;
+
+  /**
    * Creates a new user account.
    *
    * @param input - User fields to persist.
+   * @param actingUserId - User performing the create action.
    * @returns The newly created user record.
    */
-  createUser(input: CreateUserInput): Promise<UserRecord>;
+  createUser(input: CreateUserInput, actingUserId: string): Promise<UserRecord>;
 
   /**
    * Finds a user by stable identifier.
@@ -68,16 +83,18 @@ export interface IDatabase {
    *
    * @param id - User identifier to update.
    * @param input - Partial fields to apply.
+   * @param actingUserId - User performing the update action.
    * @returns The updated user record.
    */
-  updateUser(id: string, input: UpdateUserInput): Promise<UserRecord>;
+  updateUser(id: string, input: UpdateUserInput, actingUserId: string): Promise<UserRecord>;
 
   /**
    * Deletes a user account and revokes all of their API tokens.
    *
    * @param id - User identifier to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  deleteUser(id: string): Promise<void>;
+  deleteUser(id: string, actingUserId: string): Promise<void>;
 
   /**
    * Assigns legacy API tokens without an owner to the bootstrap user.
@@ -90,8 +107,9 @@ export interface IDatabase {
    * Persists a newly generated API token record.
    *
    * @param record - Token metadata including the stored hash (not the raw secret).
+   * @param actingUserId - User performing the create action.
    */
-  createApiToken(record: ApiTokenRecord): Promise<void>;
+  createApiToken(record: ApiTokenRecord, actingUserId: string): Promise<void>;
 
   /**
    * Looks up a non-revoked token by its sha256 hash for request authentication.
@@ -117,9 +135,10 @@ export interface IDatabase {
    * Soft-revokes a token by id.
    *
    * @param id - Token identifier to revoke.
+   * @param actingUserId - User performing the revoke action.
    * @returns True when an active token was updated; false when already revoked or missing.
    */
-  revokeApiToken(id: string): Promise<boolean>;
+  revokeApiToken(id: string, actingUserId: string): Promise<boolean>;
 
   /**
    * Updates the last-used timestamp for a token after successful authentication.
@@ -140,9 +159,10 @@ export interface IDatabase {
    * Creates a new collection with the given name.
    *
    * @param name - Display name for the collection.
+   * @param actingUserId - User performing the create action.
    * @returns The newly created collection.
    */
-  createCollection(name: string): Promise<CollectionRecord>;
+  createCollection(name: string, actingUserId: string): Promise<CollectionRecord>;
 
   /**
    * Updates a collection's name, variables, headers, and scripts.
@@ -154,6 +174,7 @@ export interface IDatabase {
    * @param preRequestScript - Script run before each request in the collection.
    * @param postRequestScript - Script run after each request in the collection.
    * @param auth - Default Authorization settings for requests in the collection.
+   * @param actingUserId - User performing the update action.
    * @returns The updated collection.
    */
   updateCollection(
@@ -163,15 +184,17 @@ export interface IDatabase {
     headers: KeyValue[],
     preRequestScript: string,
     postRequestScript: string,
-    auth: AuthConfig
+    auth: AuthConfig,
+    actingUserId: string
   ): Promise<CollectionRecord>;
 
   /**
    * Deletes a collection and all of its requests and folders.
    *
    * @param id - Collection ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  deleteCollection(id: string): Promise<void>;
+  deleteCollection(id: string, actingUserId: string): Promise<void>;
 
   /**
    * Lists all environments ordered by name.
@@ -184,9 +207,10 @@ export interface IDatabase {
    * Creates a new environment with the given name.
    *
    * @param name - Display name for the environment.
+   * @param actingUserId - User performing the create action.
    * @returns The newly created environment.
    */
-  createEnvironment(name: string): Promise<EnvironmentRecord>;
+  createEnvironment(name: string, actingUserId: string): Promise<EnvironmentRecord>;
 
   /**
    * Updates an environment's name and variables.
@@ -194,16 +218,23 @@ export interface IDatabase {
    * @param id - Environment ID to update.
    * @param name - New display name.
    * @param variables - Environment-scoped variables.
+   * @param actingUserId - User performing the update action.
    * @returns The updated environment.
    */
-  updateEnvironment(id: string, name: string, variables: Variable[]): Promise<EnvironmentRecord>;
+  updateEnvironment(
+    id: string,
+    name: string,
+    variables: Variable[],
+    actingUserId: string
+  ): Promise<EnvironmentRecord>;
 
   /**
    * Deletes an environment.
    *
    * @param id - Environment ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  deleteEnvironment(id: string): Promise<void>;
+  deleteEnvironment(id: string, actingUserId: string): Promise<void>;
 
   /**
    * Lists all saved requests in a collection.
@@ -225,16 +256,18 @@ export interface IDatabase {
    * Inserts a new request or updates an existing one.
    *
    * @param input - Request fields to persist.
+   * @param actingUserId - User performing the save action.
    * @returns The saved request with ID and timestamps.
    */
-  saveRequest(input: SaveRequestInput): Promise<SavedRequestRecord>;
+  saveRequest(input: SaveRequestInput, actingUserId: string): Promise<SavedRequestRecord>;
 
   /**
    * Deletes a saved request by ID.
    *
    * @param id - Request ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  deleteRequest(id: string): Promise<void>;
+  deleteRequest(id: string, actingUserId: string): Promise<void>;
 
   /**
    * Lists all folders in a collection.
@@ -257,33 +290,41 @@ export interface IDatabase {
    *
    * @param collectionId - Collection to add the folder to.
    * @param name - Display name for the folder.
+   * @param actingUserId - User performing the create action.
    * @returns The newly created folder.
    */
-  createFolder(collectionId: string, name: string): Promise<FolderRecord>;
+  createFolder(collectionId: string, name: string, actingUserId: string): Promise<FolderRecord>;
 
   /**
    * Renames a folder.
    *
    * @param id - Folder ID to rename.
    * @param name - New display name.
+   * @param actingUserId - User performing the rename action.
    * @returns The updated folder.
    */
-  renameFolder(id: string, name: string): Promise<FolderRecord>;
+  renameFolder(id: string, name: string, actingUserId: string): Promise<FolderRecord>;
 
   /**
    * Deletes a folder and all requests inside it.
    *
    * @param id - Folder ID to delete.
+   * @param actingUserId - User performing the delete action.
    */
-  deleteFolder(id: string): Promise<void>;
+  deleteFolder(id: string, actingUserId: string): Promise<void>;
 
   /**
    * Reorders folders within a collection.
    *
    * @param collectionId - Collection containing the folders.
    * @param orderedFolderIds - Folder IDs in desired order.
+   * @param actingUserId - User performing the reorder action.
    */
-  reorderFolders(collectionId: string, orderedFolderIds: string[]): Promise<void>;
+  reorderFolders(
+    collectionId: string,
+    orderedFolderIds: string[],
+    actingUserId: string
+  ): Promise<void>;
 
   /**
    * Reorders requests within a folder or at collection root.
@@ -291,11 +332,13 @@ export interface IDatabase {
    * @param collectionId - Collection containing the requests.
    * @param folderId - Folder ID, or null for root-level requests.
    * @param orderedRequestIds - Request IDs in desired order.
+   * @param actingUserId - User performing the reorder action.
    */
   reorderRequests(
     collectionId: string,
     folderId: string | null,
-    orderedRequestIds: string[]
+    orderedRequestIds: string[],
+    actingUserId: string
   ): Promise<void>;
 
   /**
@@ -304,6 +347,12 @@ export interface IDatabase {
    * @param requestId - Request ID to move.
    * @param folderId - Destination folder ID, or null for collection root.
    * @param index - Zero-based position within the destination container.
+   * @param actingUserId - User performing the move action.
    */
-  moveRequest(requestId: string, folderId: string | null, index: number): Promise<void>;
+  moveRequest(
+    requestId: string,
+    folderId: string | null,
+    index: number,
+    actingUserId: string
+  ): Promise<void>;
 }

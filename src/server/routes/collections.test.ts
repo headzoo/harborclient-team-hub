@@ -7,6 +7,7 @@ import {
   sampleUserRecord,
   validBearerToken
 } from '#/server/routes/test/createTestApp.js';
+import { sampleAttribution } from '#/server/routes/test/sampleAttribution.js';
 
 const sampleCollection = {
   id: 'collection-1',
@@ -16,7 +17,9 @@ const sampleCollection = {
   auth: defaultAuth(),
   preRequestScript: '',
   postRequestScript: '',
-  createdAt: new Date('2026-01-01T00:00:00.000Z')
+  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  ...sampleAttribution
 };
 
 describe('collection routes', () => {
@@ -49,7 +52,8 @@ describe('collection routes', () => {
       collections: [
         {
           ...sampleCollection,
-          createdAt: sampleCollection.createdAt.toISOString()
+          createdAt: sampleCollection.createdAt.toISOString(),
+          updatedAt: sampleCollection.updatedAt.toISOString()
         }
       ]
     });
@@ -71,7 +75,7 @@ describe('collection routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(db.createCollection).toHaveBeenCalledWith('Shared API');
+    expect(db.createCollection).toHaveBeenCalledWith('Shared API', 'user-1');
     expect(response.json().name).toBe('Shared API');
 
     await app.close();
