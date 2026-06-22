@@ -10,6 +10,7 @@
     "#/*": "./src/*"
   },
   "scripts": {
+    "prepare": "git config --local core.hooksPath .githooks 2>/dev/null || true",
     "dev": "tsx src/cli.ts",
     "build": "tsup",
     "start": "node dist/cli.js start",
@@ -22,7 +23,11 @@
     "docs:build": "pnpm docs:build:nav && vitepress build docs",
     "docs:build:nav": "node scripts/build-docs-nav.mjs && node scripts/assert-docs-slugs.mjs",
     "docs:preview": "pnpm docs:build && vitepress preview docs",
-    "docs:serve": "pnpm docs:build:nav && concurrently --kill-others --prefixColors=auto -n nav,vp \"node scripts/watch-docs-nav.mjs\" \"vitepress dev docs\""
+    "docs:serve": "pnpm docs:build:nav && concurrently --kill-others --prefixColors=auto -n nav,vp \"node scripts/watch-docs-nav.mjs\" \"vitepress dev docs\"",
+    "release": "gh workflow run Release --ref main -f release_type=patch",
+    "release:patch": "gh workflow run Release --ref main -f release_type=patch",
+    "release:minor": "gh workflow run Release --ref main -f release_type=minor",
+    "release:major": "gh workflow run Release --ref main -f release_type=major"
   },
   "author": {
     "name": "Harbor",
