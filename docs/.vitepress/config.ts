@@ -19,6 +19,34 @@ export default defineConfig({
   base: siteBase,
   appearance: 'force-dark',
   cleanUrls: true,
+  head: [
+    [
+      'link',
+      {
+        rel: 'icon',
+        type: 'image/png',
+        sizes: '32x32',
+        href: withSiteBase('/images/favicon-32x32.png'),
+      },
+    ],
+    [
+      'link',
+      {
+        rel: 'icon',
+        type: 'image/png',
+        sizes: '16x16',
+        href: withSiteBase('/images/favicon-16x16.png'),
+      },
+    ],
+    [
+      'link',
+      {
+        rel: 'apple-touch-icon',
+        sizes: '128x128',
+        href: withSiteBase('/images/apple-touch-icon.png'),
+      },
+    ],
+  ],
   vite: {
     publicDir: '.vitepress/static',
   },
