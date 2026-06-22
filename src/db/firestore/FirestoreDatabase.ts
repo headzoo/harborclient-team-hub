@@ -321,13 +321,9 @@ export class FirestoreDatabase implements IDatabase {
       .get();
 
     const batch = client.batch();
-    const revokedAt = new Date();
 
     for (const doc of tokenSnapshot.docs) {
-      const data = doc.data() as FirestoreApiTokenDocument;
-      if (data.revokedAt === null) {
-        batch.update(doc.ref, { revokedAt });
-      }
+      batch.delete(doc.ref);
     }
 
     batch.delete(client.collection(USERS_COLLECTION).doc(id));

@@ -5,7 +5,9 @@ import {
   canAccessEnvironment,
   canCreateCollection,
   canCreateEnvironment,
+  canListCollections,
   canUseDataApi,
+  canUseManagementApi,
   isAdmin,
   canUseLlm,
   isLlmModelAllowed,
@@ -104,6 +106,8 @@ describe('accessControl', () => {
   it('identifies admin accounts', () => {
     expect(isAdmin(adminUser)).toBe(true);
     expect(isAdmin(baseUser)).toBe(false);
+    expect(canUseManagementApi(adminUser)).toBe(true);
+    expect(canUseManagementApi(baseUser)).toBe(false);
   });
 
   it('denies admins and scoped users correctly for collections', () => {
@@ -118,6 +122,12 @@ describe('accessControl', () => {
     expect(canAccessEnvironment(baseUser, 'env-a')).toBe(true);
     expect(canAccessEnvironment(baseUser, 'env-b')).toBe(false);
     expect(canAccessEnvironment(wildcardUser, 'env-b')).toBe(true);
+  });
+
+  it('allows list collections for user and admin roles', () => {
+    expect(canListCollections(adminUser)).toBe(true);
+    expect(canListCollections(baseUser)).toBe(true);
+    expect(canListCollections(wildcardUser)).toBe(true);
   });
 
   it('allows create only for wildcard users', () => {

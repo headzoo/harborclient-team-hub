@@ -129,6 +129,149 @@ curl -s http://127.0.0.1:8788/auth/session \
   -H "Authorization: Bearer hbk_your_token_here"
 ```
 
+## Administration
+
+Management routes require an `admin`-role bearer token. `user`-role tokens receive **403 Forbidden**.
+
+### GET /admin/users
+
+Lists user accounts on the Team Hub server. The internal `system` account used for migrations and CLI attribution is omitted.
+
+**Response `200`:**
+
+```json
+{
+  "users": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "alice",
+      "role": "user",
+      "collectionAccess": ["*"],
+      "environmentAccess": ["*"],
+      "llmAccess": true,
+      "llmModels": ["*"],
+      "llmMonthlyTokenLimit": 100000,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Response `403`:** Authenticated `user`-role token.
+
+**Response `401`:** Missing, malformed, unknown, or revoked bearer token.
+
+```bash
+curl -s http://127.0.0.1:8788/admin/users \
+  -H "Authorization: Bearer hbk_your_admin_token_here"
+```
+
+### PUT /admin/users/:id
+
+Updates a user account. The internal `system` account cannot be modified (403).
+
+**Request body** (all fields optional):
+
+```json
+{
+  "name": "alice",
+  "role": "user",
+  "collectionAccess": ["*"],
+  "environmentAccess": ["*"],
+  "llmAccess": true,
+  "llmModels": ["*"],
+  "llmMonthlyTokenLimit": 100000
+}
+```
+
+**Response `200`:** Updated user record (same shape as entries in `GET /admin/users`).
+
+**Response `400`:** Invalid access list (for example wildcard combined with specific ids).
+
+**Response `403`:** Authenticated `user`-role token, or attempt to modify the `system` account.
+
+**Response `404`:** Unknown user id.
+
+```bash
+curl -s -X PUT http://127.0.0.1:8788/admin/users/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer hbk_your_admin_token_here" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"alice-renamed"}'
+```
+
+### DELETE /admin/users/:id
+
+Deletes a user account and permanently removes all of their API tokens. The internal `system` account cannot be deleted (403).
+
+**Response `204`:** User deleted.
+
+**Response `403`:** Authenticated `user`-role token, or attempt to delete the `system` account.
+
+**Response `404`:** Unknown user id.
+
+```bash
+curl -s -X DELETE http://127.0.0.1:8788/admin/users/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer hbk_your_admin_token_here"
+```
+
+### GET /admin/collections
+
+Lists all collections as lightweight `{ id, name }` records for operator user management.
+
+**Response `200`:**
+
+```json
+{
+  "collections": [
+    { "id": "550e8400-e29b-41d4-a716-446655440000", "name": "Shared API" }
+  ]
+}
+```
+
+**Response `403`:** Authenticated `user`-role token.
+
+```bash
+curl -s http://127.0.0.1:8788/admin/collections \
+  -H "Authorization: Bearer hbk_your_admin_token_here"
+```
+
+### GET /admin/environments
+
+Lists all environments as lightweight `{ id, name }` records for operator user management.
+
+**Response `200`:**
+
+```json
+{
+  "environments": [
+    { "id": "660e8400-e29b-41d4-a716-446655440001", "name": "Production" }
+  ]
+}
+```
+
+**Response `403`:** Authenticated `user`-role token.
+
+```bash
+curl -s http://127.0.0.1:8788/admin/environments \
+  -H "Authorization: Bearer hbk_your_admin_token_here"
+```
+
+### GET /admin/llm/models
+
+Lists all hub-offered LLM models from `server.yaml` for operator user management. Unlike `GET /llm/models`, this route is not filtered by the authenticated admin's own model access list.
+
+**Response `200`:** Same shape as `GET /llm/models`.
+
+**Response `403`:** Authenticated `user`-role token.
+
+**Response `503`:** LLM support is not configured on this Team Hub.
+
+```bash
+curl -s http://127.0.0.1:8788/admin/llm/models \
+  -H "Authorization: Bearer hbk_your_admin_token_here"
+```
+
 ## Collections
 
 Collections are top-level workspaces that hold folders, saved requests, and collection-scoped defaults (variables, headers, scripts, auth).
@@ -150,7 +293,7 @@ Collections are top-level workspaces that hold folders, saved requests, and coll
 
 ### GET /collections
 
-Lists all collections ordered by name.
+Lists all collections ordered by name. Results are filtered by the authenticated user's collection access list. `admin`-role tokens receive an empty list (no scoped access) but may call this route so HarborClient can mount a hub configured with an admin token.
 
 **Auth:** Bearer token required.
 

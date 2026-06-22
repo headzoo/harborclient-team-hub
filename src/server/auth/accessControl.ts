@@ -11,6 +11,16 @@ export function isAdmin(user: UserRecord): boolean {
 }
 
 /**
+ * Returns true when the user may call management API routes for user and token administration.
+ *
+ * @param user - Authenticated user attached to the request.
+ * @returns True for `admin`-role accounts.
+ */
+export function canUseManagementApi(user: UserRecord): boolean {
+  return isAdmin(user);
+}
+
+/**
  * Returns true when the user may call entity data API routes for collections,
  * environments, folders, and requests.
  *
@@ -19,6 +29,19 @@ export function isAdmin(user: UserRecord): boolean {
  */
 export function canUseDataApi(user: UserRecord): boolean {
   return user.role === 'user';
+}
+
+/**
+ * Returns true when the user may list collections via `GET /collections`.
+ *
+ * Admins receive an empty list (no scoped access) but may call the route so
+ * HarborClient can mount a hub configured with an admin token.
+ *
+ * @param user - Authenticated user attached to the request.
+ * @returns True for `user`- and `admin`-role accounts.
+ */
+export function canListCollections(user: UserRecord): boolean {
+  return canUseDataApi(user) || canUseManagementApi(user);
 }
 
 /**

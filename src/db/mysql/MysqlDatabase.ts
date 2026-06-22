@@ -379,10 +379,7 @@ export class MysqlDatabase implements IDatabase {
     const connection = await this.requirePool().getConnection();
     try {
       await connection.beginTransaction();
-      await connection.execute(
-        `UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`,
-        [new Date(), id]
-      );
+      await connection.execute('DELETE FROM api_tokens WHERE user_id = ?', [id]);
       await connection.execute('DELETE FROM users WHERE id = ?', [id]);
       await connection.commit();
     } catch (err) {

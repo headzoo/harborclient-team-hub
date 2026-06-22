@@ -1,6 +1,6 @@
 # Authentication
 
-Team Hub protects API routes with database-backed bearer tokens tied to user accounts. HarborClient desktop clients authenticate with `user`-role tokens for shared data; operators authenticate with `admin`-role tokens for account management via the REST API (management endpoints are planned). The CLI remains available for user and token administration today.
+Team Hub protects API routes with database-backed bearer tokens tied to user accounts. HarborClient desktop clients authenticate with `user`-role tokens for shared data; operators authenticate with `admin`-role tokens for account management via the REST API. The CLI remains available for user and token administration.
 
 ## Prerequisites
 
@@ -23,14 +23,16 @@ Every account has a role of either `user` or `admin`. Set the role when creating
 | Role | Purpose | Entity HTTP API | Management HTTP API | API tokens |
 | ---- | ------- | --------------- | ------------------- | ---------- |
 | `user` | HarborClient desktop clients | Scoped — [API Endpoints](./endpoints.md) | No (403) | Yes |
-| `admin` | Operators and automation | **403 Forbidden** | User/token CRUD (planned) | Yes |
+| `admin` | Operators and automation | List only (`GET /collections` returns `[]`); other entity routes 403 | List/update/delete users; list collections, environments, and LLM models via `/admin/*` | Yes |
 
 **`admin` accounts**
 
 - Can receive bearer tokens for REST authentication.
-- Cannot access collections, environments, folders, or requests (403 on entity routes).
+- May call `GET /collections` (returns an empty list; no scoped entity access).
+- Cannot read or mutate individual collections, environments, folders, or requests (403 on other entity routes).
 - Do not use access lists (always stored empty); passing `--collection-access` or `--environment-access` on create or update is rejected.
-- User and token management via REST is planned; the CLI remains available today.
+- Can list, update, and delete user accounts via `GET`, `PUT`, and `DELETE /admin/users`. Deleting a user permanently removes their API tokens.
+- Can list collection, environment, and hub LLM model metadata via `GET /admin/collections`, `GET /admin/environments`, and `GET /admin/llm/models` when assigning user access lists.
 
 **`user` accounts**
 
@@ -88,7 +90,7 @@ Clients such as HarborClient can call **`GET /auth/session`** with a bearer toke
 | `token.id` | API token record identifier |
 | `token.prefix` | Non-secret token prefix (for example `hbk_AbCd1234`) |
 | `capabilities.dataApi` | Entity routes (collections, environments, folders, requests) |
-| `capabilities.managementApi` | Management routes (user and token CRUD; planned) |
+| `capabilities.managementApi` | Management routes (for example `GET /admin/users`) |
 | `capabilities.llm` | Hub-proxied LLM routes when enabled for the account |
 
 Example for a `user`-role token:
@@ -146,7 +148,7 @@ flowchart TD
   EnvAccess["environmentAccess"]
   CollRoutes["collections / folders / requests"]
   EnvRoutes["environments"]
-  MgmtRoutes["users / tokens planned"]
+  MgmtRoutes["GET /admin/users"]
 
   UserAccount --> CollAccess
   UserAccount --> EnvAccess

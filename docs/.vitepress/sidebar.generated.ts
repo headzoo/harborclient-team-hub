@@ -203,6 +203,17 @@ export const sidebar: DefaultTheme.SidebarItem[] =
         "collapsed": false
       },
       {
+        "text": "Administration",
+        "link": "/endpoints#administration",
+        "items": [
+          {
+            "text": "GET /admin/users",
+            "link": "/endpoints#get-adminusers"
+          }
+        ],
+        "collapsed": false
+      },
+      {
         "text": "Collections",
         "link": "/endpoints#collections",
         "items": [

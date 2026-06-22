@@ -92,7 +92,7 @@ export interface IDatabase {
   updateUser(id: string, input: UpdateUserInput, actingUserId: string): Promise<UserRecord>;
 
   /**
-   * Deletes a user account and revokes all of their API tokens.
+   * Deletes a user account and permanently removes all of their API tokens.
    *
    * @param id - User identifier to delete.
    * @param actingUserId - User performing the delete action.

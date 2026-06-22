@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { LlmConfig } from '#/config/llmConfig.js';
 import type { IDatabase } from '#/db/IDatabase.js';
 import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
+import { registerAdminRoutes } from '#/server/routes/admin.js';
 import { registerAuthRoutes } from '#/server/routes/auth.js';
 import { registerCollectionRoutes } from '#/server/routes/collections.js';
 import { registerEnvironmentRoutes } from '#/server/routes/environments.js';
@@ -63,6 +64,7 @@ export async function registerProtectedRoutes(
   app.addHook('onRequest', createBearerAuthHook(options.db, options.throttleStore));
 
   await registerAuthRoutes(app);
+  await registerAdminRoutes(app, { db: options.db, llm: options.llm });
   await registerCollectionRoutes(app, options.db);
   await registerEnvironmentRoutes(app, options.db);
   await registerFolderRoutes(app, options.db);

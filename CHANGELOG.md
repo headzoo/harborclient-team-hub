@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Enhance authentication and administration documentation. (`738f3b8`)
 - Enhance authentication documentation and API endpoint. (`5824077`)
 - Enhance Docker setup and documentation. (`90e2a39`)
 

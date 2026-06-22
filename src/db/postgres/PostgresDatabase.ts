@@ -379,10 +379,7 @@ export class PostgresDatabase implements IDatabase {
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
-      await client.query(
-        `UPDATE api_tokens SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL`,
-        [id, new Date()]
-      );
+      await client.query('DELETE FROM api_tokens WHERE user_id = $1', [id]);
       await client.query('DELETE FROM users WHERE id = $1', [id]);
       await client.query('COMMIT');
     } catch (err) {

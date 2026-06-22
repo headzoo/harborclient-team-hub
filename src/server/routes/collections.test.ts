@@ -81,8 +81,9 @@ describe('collection routes', () => {
     await app.close();
   });
 
-  it('returns 403 for admin users on collection routes', async () => {
+  it('returns an empty list for admin users on GET /collections', async () => {
     const db = createStubDatabase();
+    db.listCollections.mockResolvedValue([sampleCollection]);
     const app = await createProtectedTestApp({
       db,
       withValidAuth: true,
@@ -98,6 +99,32 @@ describe('collection routes', () => {
       method: 'GET',
       url: '/collections',
       headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ collections: [] });
+
+    await app.close();
+  });
+
+  it('returns 403 for admin users on mutating collection routes', async () => {
+    const db = createStubDatabase();
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: {
+        ...sampleUserRecord,
+        role: 'admin',
+        collectionAccess: [],
+        environmentAccess: []
+      }
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/collections',
+      headers: authHeader(),
+      payload: { name: 'Shared API' }
     });
 
     expect(response.statusCode).toBe(403);

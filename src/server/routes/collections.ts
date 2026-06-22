@@ -4,6 +4,7 @@ import type { IDatabase } from '#/db/IDatabase.js';
 import {
   canAccessCollection,
   canCreateCollection,
+  canListCollections,
   canUseDataApi,
   filterAccessibleCollections
 } from '#/server/auth/accessControl.js';
@@ -42,7 +43,7 @@ export async function registerCollectionRoutes(app: FastifyInstance, db: IDataba
     handler: async (request, reply) => {
       try {
         const user = requireAuthenticatedUser(request);
-        if (denyUnlessAllowed(reply, canUseDataApi(user))) {
+        if (denyUnlessAllowed(reply, canListCollections(user))) {
           return;
         }
 
