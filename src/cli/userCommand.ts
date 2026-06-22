@@ -2,7 +2,7 @@ import { Command, InvalidArgumentError } from 'commander';
 import { mergeGlobalOptions } from '#/cli/globalOptions.js';
 import { loadServerConfig } from '#/config/serverConfig.js';
 import { createDatabase } from '#/db/index.js';
-import type { CreateUserInput, UpdateUserInput, UserRole } from '#/db/types.js';
+import type { ApiTokenRecord, CreateUserInput, UpdateUserInput, UserRole } from '#/db/types.js';
 import { generateApiToken } from '#/server/auth/apiTokens.js';
 import type { IDatabase } from '#/db/IDatabase.js';
 
@@ -234,6 +234,25 @@ function printUser(user: {
 }
 
 /**
+ * Prints a newly created API token and its one-time secret for CLI output.
+ *
+ * @param user - Owning user account.
+ * @param record - Persisted token metadata (hash only).
+ * @param secret - Plaintext bearer token shown once at creation.
+ */
+function printCreatedApiToken(
+  user: { name: string },
+  record: ApiTokenRecord,
+  secret: string
+): void {
+  console.log(`Created API token "${record.name}" (${record.id}) for user "${user.name}".`);
+  console.log(`Token prefix: ${record.tokenPrefix}`);
+  console.log('');
+  console.log('Store this token now; it will not be shown again:');
+  console.log(secret);
+}
+
+/**
  * Creates a new user account.
  *
  * @param options - Parsed user create options.
@@ -258,9 +277,14 @@ export async function userCreateCommand(options: UserCreateCommandOptions): Prom
     },
     actingUserId
   );
+  const { record, secret } = generateApiToken(user.id, user.name);
+  await db.createApiToken(record, actingUserId);
   await db.disconnect();
 
   console.log(`Created user "${user.name}" (${user.id}) with role ${user.role}.`);
+  printUser(user);
+  console.log('');
+  printCreatedApiToken(user, record, secret);
 }
 
 /**
@@ -392,11 +416,7 @@ export async function userTokenCreateCommand(
   await db.createApiToken(record, actingUserId);
   await db.disconnect();
 
-  console.log(`Created API token "${record.name}" (${record.id}) for user "${user.name}".`);
-  console.log(`Token prefix: ${record.tokenPrefix}`);
-  console.log('');
-  console.log('Store this token now; it will not be shown again:');
-  console.log(secret);
+  printCreatedApiToken(user, record, secret);
 }
 
 /**

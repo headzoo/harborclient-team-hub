@@ -12,15 +12,44 @@ export interface CollectionCommandOptions {
 }
 
 /**
+ * Formats a stored user id for CLI attribution output.
+ *
+ * @param userId - User id from a record's attribution field, or null when unset.
+ * @param usersById - Lookup map from user id to display name.
+ * @returns Display name with id, raw id, or a dash placeholder.
+ */
+function formatAttributionUser(userId: string | null, usersById: Map<string, string>): string {
+  if (!userId) {
+    return '-';
+  }
+
+  const name = usersById.get(userId);
+  if (!name) {
+    return userId;
+  }
+
+  return `${name} (${userId})`;
+}
+
+/**
  * Prints a collection record for CLI listings.
  *
  * @param collection - Collection record to display.
+ * @param usersById - Lookup map from user id to display name.
+ * @param requestCount - Number of saved requests in the collection.
  */
-function printCollection(collection: CollectionRecord): void {
+function printCollection(
+  collection: CollectionRecord,
+  usersById: Map<string, string>,
+  requestCount: number
+): void {
   console.log(`- id: ${collection.id}`);
   console.log(`  name: ${collection.name}`);
+  console.log(`  requests: ${requestCount}`);
   console.log(`  created: ${collection.createdAt.toISOString()}`);
   console.log(`  updated: ${collection.updatedAt.toISOString()}`);
+  console.log(`  created by: ${formatAttributionUser(collection.createdByUserId, usersById)}`);
+  console.log(`  updated by: ${formatAttributionUser(collection.updatedByUserId, usersById)}`);
 }
 
 /**
@@ -34,7 +63,17 @@ export async function collectionListCommand(options: CollectionCommandOptions): 
 
   await db.connect();
   const collections = await db.listCollections();
+  const users = await db.listUsers();
+  const requestCounts = await Promise.all(
+    collections.map(async (collection) => {
+      const requests = await db.listRequests(collection.id);
+      return [collection.id, requests.length] as const;
+    })
+  );
   await db.disconnect();
+
+  const usersById = new Map(users.map((user) => [user.id, user.name]));
+  const requestCountByCollectionId = new Map(requestCounts);
 
   if (collections.length === 0) {
     console.log('No collections found.');
@@ -42,7 +81,7 @@ export async function collectionListCommand(options: CollectionCommandOptions): 
   }
 
   for (const collection of collections) {
-    printCollection(collection);
+    printCollection(collection, usersById, requestCountByCollectionId.get(collection.id) ?? 0);
   }
 }
 

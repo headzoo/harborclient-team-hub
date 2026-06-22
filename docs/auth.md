@@ -132,7 +132,7 @@ flowchart TD
 
 ## Manage users
 
-Use the command line to create and manage users.
+Use the command line to create and manage users. See [CLI](./cli.md#user) for the full command reference, options, and output formats.
 
 ```bash
 # Create an operator account (admin role, for management API tokens)
@@ -154,7 +154,7 @@ service-hub user delete <user-id>
 
 ## Manage tokens
 
-Tokens always belong to a user. Issue `user`-role tokens for HarborClient desktop clients and `admin`-role tokens for operator REST clients. Entity routes require a `user`-role token; management routes will require an `admin`-role token.
+Tokens always belong to a user. Issue `user`-role tokens for HarborClient desktop clients and `admin`-role tokens for operator REST clients. Entity routes require a `user`-role token; management routes will require an `admin`-role token. See [CLI — user token](./cli.md#user-token) for all token subcommands and flags.
 
 ```bash
 service-hub user token create --user <user-id> --name "Alice laptop"

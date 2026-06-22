@@ -21,6 +21,45 @@ export const sidebar: DefaultTheme.SidebarItem[] =
     "link": "/auth"
   },
   {
+    "text": "CLI",
+    "link": "/cli",
+    "items": [
+      {
+        "text": "Global options",
+        "link": "/cli#global-options"
+      },
+      {
+        "text": "Commands overview",
+        "link": "/cli#commands-overview"
+      },
+      {
+        "text": "start",
+        "link": "/cli#start"
+      },
+      {
+        "text": "migrate",
+        "link": "/cli#migrate"
+      },
+      {
+        "text": "collection list",
+        "link": "/cli#collection-list"
+      },
+      {
+        "text": "user",
+        "link": "/cli#user"
+      },
+      {
+        "text": "user token",
+        "link": "/cli#user-token"
+      },
+      {
+        "text": "Examples",
+        "link": "/cli#examples"
+      }
+    ],
+    "collapsed": false
+  },
+  {
     "text": "API Endpoints",
     "link": "/endpoints",
     "items": [

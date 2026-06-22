@@ -408,6 +408,22 @@ ${sampleDbSection}${sampleRedisSection}`);
         updatedByUserId: 'user-1'
       }
     ]);
+    db.listUsers = vi.fn().mockResolvedValue([
+      {
+        id: 'user-1',
+        name: 'Alice',
+        role: 'user',
+        collectionAccess: ['*'],
+        environmentAccess: ['*'],
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        createdByUserId: null,
+        updatedByUserId: null
+      }
+    ]);
+    db.listRequests = vi
+      .fn()
+      .mockResolvedValue([{ id: 'request-1' }, { id: 'request-2' }, { id: 'request-3' }]);
     createDatabaseMock.mockReturnValue(db);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
@@ -415,8 +431,13 @@ ${sampleDbSection}${sampleRedisSection}`);
 
     expect(db.connect).toHaveBeenCalledOnce();
     expect(db.listCollections).toHaveBeenCalledOnce();
+    expect(db.listUsers).toHaveBeenCalledOnce();
+    expect(db.listRequests).toHaveBeenCalledWith('collection-1');
     expect(db.disconnect).toHaveBeenCalledOnce();
     expect(log).toHaveBeenCalledWith('- id: collection-1');
+    expect(log).toHaveBeenCalledWith('  requests: 3');
+    expect(log).toHaveBeenCalledWith('  created by: Alice (user-1)');
+    expect(log).toHaveBeenCalledWith('  updated by: Alice (user-1)');
 
     log.mockRestore();
   });
@@ -442,9 +463,19 @@ ${sampleDbSection}${sampleRedisSection}`);
 
     expect(db.connect).toHaveBeenCalledOnce();
     expect(db.createUser).toHaveBeenCalledOnce();
+    expect(db.createApiToken).toHaveBeenCalledOnce();
+    expect(db.createApiToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        name: 'Alice'
+      }),
+      'system-user-id'
+    );
     expect(db.migrate).toHaveBeenCalledOnce();
     expect(db.disconnect).toHaveBeenCalledOnce();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Created user "Alice"'));
+    expect(log).toHaveBeenCalledWith('- id: user-1');
+    expect(log.mock.calls.some((call) => String(call[0]).startsWith('hbk_'))).toBe(true);
 
     log.mockRestore();
   });
