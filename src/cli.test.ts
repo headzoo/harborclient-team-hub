@@ -87,6 +87,8 @@ function createMockDatabase(): IDatabase {
     updatedByUserId: 'system-user-id'
   });
   db.listUsers.mockResolvedValue([]);
+  db.listCollections.mockResolvedValue([]);
+  db.listEnvironments.mockResolvedValue([]);
   db.updateUser.mockResolvedValue({
     id: 'user-1',
     name: 'Alice',

@@ -26,6 +26,8 @@ export function createStubDatabase(): Mocked<IDatabase> {
     findActiveApiTokenByHash: vi.fn(),
     listApiTokens: vi.fn(),
     listApiTokensByUserId: vi.fn(),
+    findApiTokenById: vi.fn(),
+    deleteApiToken: vi.fn(),
     revokeApiToken: vi.fn(),
     touchApiTokenLastUsed: vi.fn(),
     listCollections: vi.fn(),

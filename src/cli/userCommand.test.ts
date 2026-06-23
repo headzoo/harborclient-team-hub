@@ -1,3 +1,4 @@
+import { InvalidArgumentError } from 'commander';
 import { describe, expect, it, vi } from 'vitest';
 import { userCreateCommand } from '#/cli/userCommand.js';
 import type { IDatabase } from '#/db/IDatabase.js';
@@ -19,6 +20,8 @@ function createDatabaseMock(): IDatabase {
     disconnect: vi.fn(),
     migrate: vi.fn(),
     getSystemUserId: vi.fn(() => 'system-user-id'),
+    listCollections: vi.fn(async () => [{ id: 'collection-1', name: 'Shared API' }]),
+    listEnvironments: vi.fn(async () => [{ id: 'env-1', name: 'Production' }]),
     createUser: vi.fn(async (input) => ({
       id: 'user-id',
       name: input.name,
@@ -64,5 +67,51 @@ describe('userCreateCommand llm model flags', () => {
     );
 
     log.mockRestore();
+  });
+
+  it('rejects unknown collection access ids on create', async () => {
+    const db = createDatabaseMock();
+    const { createDatabase } = await import('#/db/index.js');
+    vi.mocked(createDatabase).mockReturnValue(db);
+
+    await expect(
+      userCreateCommand({
+        config: 'server.yaml',
+        name: 'tester',
+        role: 'user',
+        collectionAccess: ['missing-col'],
+        environmentAccess: ['*']
+      })
+    ).rejects.toThrow('Unknown collection id: missing-col.');
+
+    expect(db.createUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects collection access flags on admin accounts', async () => {
+    const db = createDatabaseMock();
+    const { createDatabase } = await import('#/db/index.js');
+    vi.mocked(createDatabase).mockReturnValue(db);
+
+    await expect(
+      userCreateCommand({
+        config: 'server.yaml',
+        name: 'admin-user',
+        role: 'admin',
+        collectionAccess: ['*'],
+        environmentAccess: []
+      })
+    ).rejects.toThrow(InvalidArgumentError);
+
+    await expect(
+      userCreateCommand({
+        config: 'server.yaml',
+        name: 'admin-user',
+        role: 'admin',
+        collectionAccess: ['*'],
+        environmentAccess: []
+      })
+    ).rejects.toThrow('Admin users cannot have collection or environment access.');
+
+    expect(db.createUser).not.toHaveBeenCalled();
   });
 });

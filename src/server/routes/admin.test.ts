@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createStubDatabase } from '#/db/stubDatabase.js';
+import { DuplicateUserNameError, ReservedUserNameError } from '#/db/userNameValidation.js';
 import {
   authHeader,
   createProtectedTestApp,
@@ -7,6 +8,45 @@ import {
   sampleUserRecord
 } from '#/server/routes/test/createTestApp.js';
 import { sampleAttribution } from '#/server/routes/test/sampleAttribution.js';
+
+const sampleLlmConfig = {
+  providers: {
+    openai: { apiKey: 'sk-test' }
+  },
+  models: ['gpt-4o']
+};
+
+const sampleCollection = {
+  id: 'collection-1',
+  name: 'Shared API',
+  variables: [],
+  headers: [],
+  auth: { type: 'none' as const, basic: { username: '', password: '' }, bearer: { token: '' } },
+  preRequestScript: '',
+  postRequestScript: '',
+  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  ...sampleAttribution
+};
+
+const sampleEnvironment = {
+  id: 'env-1',
+  name: 'Production',
+  variables: [],
+  createdAt: new Date('2026-01-02T00:00:00.000Z'),
+  updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+  ...sampleAttribution
+};
+
+/**
+ * Configures catalog list mocks used by admin user access validation.
+ *
+ * @param db - Database stub for admin route tests.
+ */
+function mockAccessCatalogs(db: ReturnType<typeof createStubDatabase>): void {
+  db.listCollections.mockResolvedValue([sampleCollection]);
+  db.listEnvironments.mockResolvedValue([sampleEnvironment]);
+}
 
 describe('GET /admin/users', () => {
   it('omits the internal system user from the response', async () => {
@@ -34,6 +74,7 @@ describe('GET /admin/users', () => {
     };
     db.getSystemUserId.mockReturnValue('system-user-id');
     db.listUsers.mockResolvedValue([systemUser, adminUser, listedUser]);
+    mockAccessCatalogs(db);
 
     const app = await createProtectedTestApp({
       db,
@@ -56,6 +97,55 @@ describe('GET /admin/users', () => {
     await app.close();
   });
 
+  it('includes unrelated accounts named system when systemUserId is known', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      name: 'Ops',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const systemUser = {
+      ...sampleUserRecord,
+      id: 'system-user-id',
+      name: 'system',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const decoySystemNameUser = {
+      ...sampleUserRecord,
+      id: 'other-id',
+      name: 'system',
+      role: 'user' as const
+    };
+    db.getSystemUserId.mockReturnValue('system-user-id');
+    db.listUsers.mockResolvedValue([systemUser, adminUser, decoySystemNameUser]);
+    mockAccessCatalogs(db);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/users',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().users.map((user: { id: string }) => user.id)).toEqual([
+      'admin-1',
+      'other-id'
+    ]);
+
+    await app.close();
+  });
+
   it('returns all users for admin-role tokens', async () => {
     const db = createStubDatabase();
     const adminUser = {
@@ -72,6 +162,7 @@ describe('GET /admin/users', () => {
       name: 'Alice'
     };
     db.listUsers.mockResolvedValue([adminUser, listedUser]);
+    mockAccessCatalogs(db);
 
     const app = await createProtectedTestApp({
       db,
@@ -98,7 +189,8 @@ describe('GET /admin/users', () => {
           llmModels: [],
           llmMonthlyTokenLimit: null,
           createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z'
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          warnings: []
         },
         {
           id: 'user-2',
@@ -110,11 +202,56 @@ describe('GET /admin/users', () => {
           llmModels: [],
           llmMonthlyTokenLimit: null,
           createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z'
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          warnings: []
         }
       ]
     });
     expect(db.listUsers).toHaveBeenCalledOnce();
+    expect(db.listCollections).toHaveBeenCalledOnce();
+    expect(db.listEnvironments).toHaveBeenCalledOnce();
+
+    await app.close();
+  });
+
+  it('includes warnings for stale access list references', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      name: 'Ops',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const listedUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice',
+      collectionAccess: ['collection-1', 'deleted-col'],
+      environmentAccess: ['missing-env']
+    };
+    db.listUsers.mockResolvedValue([adminUser, listedUser]);
+    mockAccessCatalogs(db);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser,
+      llm: sampleLlmConfig
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/users',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().users[1].warnings).toEqual([
+      'Unknown collection id "deleted-col".',
+      'Unknown environment id "missing-env".'
+    ]);
 
     await app.close();
   });
@@ -180,6 +317,7 @@ describe('PUT /admin/users/:id', () => {
 
     db.findUserById.mockResolvedValue(targetUser);
     db.updateUser.mockResolvedValue(updatedUser);
+    mockAccessCatalogs(db);
 
     const app = await createProtectedTestApp({
       db,
@@ -228,7 +366,9 @@ describe('PUT /admin/users/:id', () => {
     const targetUser = {
       ...sampleUserRecord,
       id: 'user-2',
-      name: 'Alice'
+      name: 'Alice',
+      llmAccess: true,
+      llmModels: ['gpt-4o']
     };
 
     db.findUserById.mockResolvedValue(targetUser);
@@ -236,8 +376,11 @@ describe('PUT /admin/users/:id', () => {
       ...targetUser,
       role: 'admin',
       collectionAccess: [],
-      environmentAccess: []
+      environmentAccess: [],
+      llmAccess: false,
+      llmModels: []
     });
+    mockAccessCatalogs(db);
 
     const app = await createProtectedTestApp({
       db,
@@ -269,7 +412,9 @@ describe('PUT /admin/users/:id', () => {
       expect.objectContaining({
         role: 'admin',
         collectionAccess: [],
-        environmentAccess: []
+        environmentAccess: [],
+        llmAccess: false,
+        llmModels: []
       }),
       'admin-1'
     );
@@ -314,6 +459,283 @@ describe('PUT /admin/users/:id', () => {
     await app.close();
   });
 
+  it('returns 400 when renaming a user to an existing name', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const targetUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice'
+    };
+    const otherUser = {
+      ...sampleUserRecord,
+      id: 'user-3',
+      name: 'Bob'
+    };
+
+    db.findUserById.mockResolvedValue(targetUser);
+    db.updateUser.mockRejectedValue(new DuplicateUserNameError('Bob'));
+    mockAccessCatalogs(db);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === targetUser.id) {
+        return targetUser;
+      }
+
+      if (id === otherUser.id) {
+        return otherUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/users/user-2',
+      headers: authHeader(),
+      payload: { name: 'Bob' }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'User name "Bob" is already in use.'
+    });
+    expect(db.updateUser).toHaveBeenCalledWith(
+      'user-2',
+      expect.objectContaining({ name: 'Bob' }),
+      'admin-1'
+    );
+
+    await app.close();
+  });
+
+  it('returns 400 when renaming a user to the reserved system name', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const targetUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice'
+    };
+
+    db.findUserById.mockResolvedValue(targetUser);
+    db.updateUser.mockRejectedValue(new ReservedUserNameError('system'));
+    mockAccessCatalogs(db);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === targetUser.id) {
+        return targetUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/users/user-2',
+      headers: authHeader(),
+      payload: { name: 'system' }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'User name "system" is reserved for the internal system account.'
+    });
+
+    await app.close();
+  });
+
+  it('returns 400 for mixed wildcard access lists', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const targetUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice'
+    };
+
+    db.findUserById.mockResolvedValue(targetUser);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === targetUser.id) {
+        return targetUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/users/user-2',
+      headers: authHeader(),
+      payload: { collectionAccess: ['*', 'collection-1'] }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'Wildcard access "*" must be the only entry.'
+    });
+    expect(db.updateUser).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('returns 400 for unknown collection access ids', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const targetUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice'
+    };
+
+    db.findUserById.mockResolvedValue(targetUser);
+    mockAccessCatalogs(db);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === targetUser.id) {
+        return targetUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/users/user-2',
+      headers: authHeader(),
+      payload: { collectionAccess: ['missing-col'] }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'Unknown collection id: missing-col.'
+    });
+    expect(db.updateUser).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('allows partial updates when stored access lists contain stale ids', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const targetUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice',
+      collectionAccess: ['deleted-col'],
+      environmentAccess: ['missing-env']
+    };
+    const updatedUser = {
+      ...targetUser,
+      name: 'Alice Updated'
+    };
+
+    db.findUserById.mockResolvedValue(targetUser);
+    db.updateUser.mockResolvedValue(updatedUser);
+    mockAccessCatalogs(db);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === targetUser.id) {
+        return targetUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/users/user-2',
+      headers: authHeader(),
+      payload: { name: 'Alice Updated' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().name).toBe('Alice Updated');
+    expect(db.updateUser).toHaveBeenCalledWith(
+      'user-2',
+      expect.objectContaining({ name: 'Alice Updated' }),
+      'admin-1'
+    );
+
+    await app.close();
+  });
+
   it('returns 403 for user-role tokens', async () => {
     const db = createStubDatabase();
     const app = await createProtectedTestApp({
@@ -330,6 +752,45 @@ describe('PUT /admin/users/:id', () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(db.updateUser).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('returns 403 when changing the authenticated admin role', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+
+    db.findUserById.mockResolvedValue(adminUser);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/users/admin-1',
+      headers: authHeader(),
+      payload: { role: 'user' }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'Forbidden' });
     expect(db.updateUser).not.toHaveBeenCalled();
 
     await app.close();
@@ -491,6 +952,44 @@ describe('DELETE /admin/users/:id', () => {
     await app.close();
   });
 
+  it('returns 403 when deleting the authenticated admin account', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+
+    db.findUserById.mockResolvedValue(adminUser);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/admin/users/admin-1',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'Forbidden' });
+    expect(db.deleteUser).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it('returns 403 when deleting the system user', async () => {
     const db = createStubDatabase();
     const adminUser = {
@@ -541,35 +1040,6 @@ describe('DELETE /admin/users/:id', () => {
     await app.close();
   });
 });
-
-const sampleLlmConfig = {
-  providers: {
-    openai: { apiKey: 'sk-test' }
-  },
-  models: ['gpt-4o']
-};
-
-const sampleCollection = {
-  id: 'collection-1',
-  name: 'Shared API',
-  variables: [],
-  headers: [],
-  auth: { type: 'none' as const, basic: { username: '', password: '' }, bearer: { token: '' } },
-  preRequestScript: '',
-  postRequestScript: '',
-  createdAt: new Date('2026-01-01T00:00:00.000Z'),
-  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-  ...sampleAttribution
-};
-
-const sampleEnvironment = {
-  id: 'env-1',
-  name: 'Production',
-  variables: [],
-  createdAt: new Date('2026-01-02T00:00:00.000Z'),
-  updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-  ...sampleAttribution
-};
 
 describe('GET /admin/collections', () => {
   it('returns all collections for admin-role tokens', async () => {
@@ -749,6 +1219,409 @@ describe('GET /admin/llm/models', () => {
     });
 
     expect(response.statusCode).toBe(403);
+
+    await app.close();
+  });
+});
+
+describe('POST /admin/users', () => {
+  it('creates a user and initial token for admin-role tokens', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const createdUser = {
+      ...sampleUserRecord,
+      id: 'user-new',
+      name: 'Bob',
+      role: 'user' as const
+    };
+
+    mockAccessCatalogs(db);
+    db.createUser.mockResolvedValue(createdUser);
+    db.createApiToken.mockResolvedValue(undefined);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/users',
+      headers: authHeader(),
+      payload: {
+        name: 'Bob',
+        role: 'user',
+        collectionAccess: ['*'],
+        environmentAccess: ['*']
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.user.name).toBe('Bob');
+    expect(body.token.userId).toBe('user-new');
+    expect(typeof body.secret).toBe('string');
+    expect(body.secret.startsWith('hbk_')).toBe(true);
+    expect(db.createUser).toHaveBeenCalledOnce();
+    expect(db.createApiToken).toHaveBeenCalledOnce();
+
+    await app.close();
+  });
+
+  it('returns 400 for duplicate user names', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+
+    mockAccessCatalogs(db);
+    db.createUser.mockRejectedValue(new DuplicateUserNameError('Bob'));
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/users',
+      headers: authHeader(),
+      payload: { name: 'Bob', role: 'user' }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(db.createApiToken).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('returns 403 for user-role tokens', async () => {
+    const db = createStubDatabase();
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: sampleUserRecord
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/users',
+      headers: authHeader(),
+      payload: { name: 'Bob', role: 'user' }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.createUser).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+});
+
+describe('GET /admin/tokens', () => {
+  it('returns all tokens for admin-role tokens', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    db.listApiTokens.mockResolvedValue([sampleApiTokenRecord]);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/tokens',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      tokens: [
+        {
+          id: sampleApiTokenRecord.id,
+          userId: sampleApiTokenRecord.userId,
+          name: sampleApiTokenRecord.name,
+          tokenPrefix: sampleApiTokenRecord.tokenPrefix,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastUsedAt: null,
+          revokedAt: null
+        }
+      ]
+    });
+
+    await app.close();
+  });
+
+  it('returns 403 for user-role tokens', async () => {
+    const db = createStubDatabase();
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: sampleUserRecord
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/tokens',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.listApiTokens).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+});
+
+describe('POST /admin/users/:id/tokens', () => {
+  it('creates a token for an existing user', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const targetUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice'
+    };
+
+    db.findUserById.mockResolvedValue(targetUser);
+    db.createApiToken.mockResolvedValue(undefined);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === targetUser.id) {
+        return targetUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/users/user-2/tokens',
+      headers: authHeader(),
+      payload: { name: 'Desktop' }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.token.userId).toBe('user-2');
+    expect(body.token.name).toBe('Desktop');
+    expect(typeof body.secret).toBe('string');
+    expect(db.createApiToken).toHaveBeenCalledOnce();
+
+    await app.close();
+  });
+
+  it('returns 404 when the user does not exist', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+
+    db.findUserById.mockResolvedValue(null);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/users/missing-id/tokens',
+      headers: authHeader(),
+      payload: { name: 'Desktop' }
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(db.createApiToken).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+});
+
+describe('DELETE /admin/tokens/:id', () => {
+  it('deletes a token for admin-role tokens', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const targetUser = {
+      ...sampleUserRecord,
+      id: 'user-2',
+      name: 'Alice'
+    };
+
+    db.findApiTokenById.mockResolvedValue(sampleApiTokenRecord);
+    db.findUserById.mockResolvedValue(targetUser);
+    db.deleteApiToken.mockResolvedValue(true);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === targetUser.id) {
+        return targetUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/admin/tokens/${sampleApiTokenRecord.id}`,
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(db.deleteApiToken).toHaveBeenCalledWith(sampleApiTokenRecord.id, 'admin-1');
+
+    await app.close();
+  });
+
+  it('returns 404 when the token does not exist', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+
+    db.findApiTokenById.mockResolvedValue(null);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/admin/tokens/missing-id',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(db.deleteApiToken).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('returns 403 when deleting a system user token', async () => {
+    const db = createStubDatabase();
+    const adminUser = {
+      ...sampleUserRecord,
+      id: 'admin-1',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const systemUser = {
+      ...sampleUserRecord,
+      id: 'system-user-id',
+      name: 'system',
+      role: 'admin' as const,
+      collectionAccess: [],
+      environmentAccess: []
+    };
+    const systemToken = {
+      ...sampleApiTokenRecord,
+      id: 'system-token',
+      userId: 'system-user-id'
+    };
+
+    db.getSystemUserId.mockReturnValue('system-user-id');
+    db.findApiTokenById.mockResolvedValue(systemToken);
+    db.findUserById.mockResolvedValue(systemUser);
+
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+    db.findUserById.mockImplementation(async (id: string) => {
+      if (id === sampleApiTokenRecord.userId || id === adminUser.id) {
+        return adminUser;
+      }
+
+      if (id === systemUser.id) {
+        return systemUser;
+      }
+
+      return null;
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/admin/tokens/system-token',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(db.deleteApiToken).not.toHaveBeenCalled();
 
     await app.close();
   });

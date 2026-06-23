@@ -135,6 +135,23 @@ export interface IDatabase {
   listApiTokensByUserId(userId: string): Promise<ApiTokenRecord[]>;
 
   /**
+   * Finds an API token record by stable identifier.
+   *
+   * @param id - Token identifier to look up.
+   * @returns Matching token record, or null when not found.
+   */
+  findApiTokenById(id: string): Promise<ApiTokenRecord | null>;
+
+  /**
+   * Permanently removes an API token record by id.
+   *
+   * @param id - Token identifier to delete.
+   * @param actingUserId - User performing the delete action.
+   * @returns True when a token row was removed; false when missing.
+   */
+  deleteApiToken(id: string, actingUserId: string): Promise<boolean>;
+
+  /**
    * Soft-revokes a token by id.
    *
    * @param id - Token identifier to revoke.

@@ -1,10 +1,19 @@
 import { Command, InvalidArgumentError } from 'commander';
 import { mergeGlobalOptions } from '#/cli/globalOptions.js';
 import { loadServerConfig } from '#/config/serverConfig.js';
+import type { LlmConfig } from '#/config/llmConfig.js';
 import { createDatabase } from '#/db/index.js';
-import type { ApiTokenRecord, CreateUserInput, UpdateUserInput, UserRole } from '#/db/types.js';
+import type { ApiTokenRecord, UpdateUserInput, UserRole } from '#/db/types.js';
 import { generateApiToken } from '#/server/auth/apiTokens.js';
-import { currentUsagePeriod } from '#/server/llm/models.js';
+import {
+  buildAccessCatalogIds,
+  buildAccessListWarnings,
+  normalizeAccessForRole,
+  normalizeLlmForRole,
+  ValidationError,
+  validateSubmittedAccessLists
+} from '#/server/admin/userValidation.js';
+import { currentUsagePeriod, listHubOfferedModels } from '#/server/llm/models.js';
 import type { IDatabase } from '#/db/IDatabase.js';
 
 /**
@@ -238,37 +247,6 @@ function parseMonthlyTokenLimit(value: string): number {
 }
 
 /**
- * Normalizes access lists for admin accounts and validates wildcard usage.
- *
- * @param role - Target user role.
- * @param collectionAccess - Parsed collection access flags.
- * @param environmentAccess - Parsed environment access flags.
- * @returns Access lists suitable for persistence.
- * @throws {InvalidArgumentError} When admins receive access flags.
- */
-function normalizeAccessForRole(
-  role: UserRole,
-  collectionAccess: string[],
-  environmentAccess: string[]
-): Pick<CreateUserInput, 'collectionAccess' | 'environmentAccess'> {
-  if (role === 'admin') {
-    if (collectionAccess.length > 0 || environmentAccess.length > 0) {
-      throw new InvalidArgumentError('Admin users cannot have collection or environment access.');
-    }
-
-    return {
-      collectionAccess: [],
-      environmentAccess: []
-    };
-  }
-
-  return {
-    collectionAccess,
-    environmentAccess
-  };
-}
-
-/**
  * Optional monthly LLM usage fields for CLI user listings.
  */
 interface UserDisplayUsage {
@@ -341,6 +319,70 @@ function printCreatedApiToken(
 }
 
 /**
+ * Loads hub resource catalogs used to validate and warn on access lists.
+ *
+ * @param db - Connected database instance.
+ * @param llm - Normalized LLM config from server.yaml, or null when unset.
+ * @returns Known collection, environment, and LLM model ids.
+ */
+async function loadAccessCatalogs(db: IDatabase, llm: LlmConfig | null) {
+  const [collections, environments] = await Promise.all([
+    db.listCollections(),
+    db.listEnvironments()
+  ]);
+
+  return buildAccessCatalogIds(
+    collections,
+    environments,
+    llm ? listHubOfferedModels(llm).map((model) => model.id) : null
+  );
+}
+
+/**
+ * Runs a validation helper and maps {@link ValidationError} to Commander errors.
+ *
+ * @param fn - Validation or normalization function from the server admin module.
+ * @returns The value returned by {@link fn}.
+ * @throws {InvalidArgumentError} When {@link fn} throws {@link ValidationError}.
+ */
+function mapValidationError<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw new InvalidArgumentError(error.message);
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Validates submitted access lists and maps server validation errors to CLI errors.
+ *
+ * @param submitted - Access fields provided on the CLI command.
+ * @param catalogs - Known collection, environment, and LLM model ids.
+ * @throws {InvalidArgumentError} When a submitted list references unknown ids.
+ */
+function validateSubmittedAccessListsOrThrow(
+  submitted: Parameters<typeof validateSubmittedAccessLists>[0],
+  catalogs: Parameters<typeof validateSubmittedAccessLists>[1]
+): void {
+  mapValidationError(() => validateSubmittedAccessLists(submitted, catalogs));
+}
+
+/**
+ * Prints stale access list warnings to stderr without changing stdout listings.
+ *
+ * @param warnings - Human-readable warnings for unknown access ids.
+ */
+function printAccessListWarnings(warnings: string[]): void {
+  for (const warning of warnings) {
+    console.warn(`Warning: ${warning}`);
+  }
+}
+
+/**
  * Creates a new user account.
  *
  * @param options - Parsed user create options.
@@ -348,22 +390,35 @@ function printCreatedApiToken(
 export async function userCreateCommand(options: UserCreateCommandOptions): Promise<void> {
   const config = loadServerConfig(options.config);
   const db = createDatabase(config.db);
-  const access = normalizeAccessForRole(
-    options.role,
-    options.collectionAccess,
-    options.environmentAccess
+  const access = mapValidationError(() =>
+    normalizeAccessForRole(options.role, options.collectionAccess, options.environmentAccess)
   );
 
   await db.connect();
   const actingUserId = await requireSystemUserId(db);
+  const catalogs = await loadAccessCatalogs(db, config.llm);
+  const llmModels = readLlmModelsOption(options);
+  const llm = mapValidationError(() =>
+    normalizeLlmForRole(options.role, options.llmAccess ?? false, llmModels)
+  );
+  validateSubmittedAccessListsOrThrow(
+    {
+      role: options.role,
+      collectionAccess: access.collectionAccess,
+      environmentAccess: access.environmentAccess,
+      llmModels
+    },
+    catalogs
+  );
+
   const user = await db.createUser(
     {
       name: options.name,
       role: options.role,
-      collectionAccess: access.collectionAccess,
-      environmentAccess: access.environmentAccess,
-      llmAccess: options.llmAccess ?? false,
-      llmModels: readLlmModelsOption(options),
+      collectionAccess: access.collectionAccess ?? [],
+      environmentAccess: access.environmentAccess ?? [],
+      llmAccess: llm.llmAccess,
+      llmModels: llm.llmModels,
       llmMonthlyTokenLimit: options.llmMonthlyTokens ?? null
     },
     actingUserId
@@ -388,7 +443,7 @@ export async function userListCommand(options: UserCommandOptions): Promise<void
   const db = createDatabase(config.db);
 
   await db.connect();
-  const users = await db.listUsers();
+  const [users, catalogs] = await Promise.all([db.listUsers(), loadAccessCatalogs(db, config.llm)]);
   const period = currentUsagePeriod();
   const tokensUsedByUser = await Promise.all(
     users.map(async (user) => {
@@ -404,6 +459,16 @@ export async function userListCommand(options: UserCommandOptions): Promise<void
   }
 
   for (const [index, user] of users.entries()) {
+    printAccessListWarnings(
+      buildAccessListWarnings(
+        {
+          collectionAccess: user.collectionAccess,
+          environmentAccess: user.environmentAccess,
+          llmModels: user.llmModels
+        },
+        catalogs
+      )
+    );
     printUser(user, { llmUsagePeriod: period, llmTokensUsed: tokensUsedByUser[index] ?? 0 });
   }
 }
@@ -418,7 +483,10 @@ export async function userShowCommand(options: UserUpdateCommandOptions): Promis
   const db = createDatabase(config.db);
 
   await db.connect();
-  const user = await db.findUserById(options.id);
+  const [user, catalogs] = await Promise.all([
+    db.findUserById(options.id),
+    loadAccessCatalogs(db, config.llm)
+  ]);
 
   if (!user) {
     await db.disconnect();
@@ -430,6 +498,16 @@ export async function userShowCommand(options: UserUpdateCommandOptions): Promis
   const usage = await db.getLlmUsage(user.id, period);
   await db.disconnect();
 
+  printAccessListWarnings(
+    buildAccessListWarnings(
+      {
+        collectionAccess: user.collectionAccess,
+        environmentAccess: user.environmentAccess,
+        llmModels: user.llmModels
+      },
+      catalogs
+    )
+  );
   printUser(user, { llmUsagePeriod: period, llmTokensUsed: usage?.totalTokens ?? 0 });
 }
 
@@ -456,15 +534,30 @@ export async function userUpdateCommand(options: UserUpdateCommandOptions): Prom
     options.collectionAccess ?? (options.role === 'admin' ? [] : existing.collectionAccess);
   const environmentAccess =
     options.environmentAccess ?? (options.role === 'admin' ? [] : existing.environmentAccess);
-  const access = normalizeAccessForRole(role, collectionAccess, environmentAccess);
+  const access = mapValidationError(() =>
+    normalizeAccessForRole(role, collectionAccess, environmentAccess)
+  );
+  const llmAccess = role === 'admin' ? false : (options.llmAccess ?? existing.llmAccess);
+  const llmModels = role === 'admin' ? [] : (options.llmModels ?? existing.llmModels);
+  const llm = mapValidationError(() => normalizeLlmForRole(role, llmAccess, llmModels));
+  const catalogs = await loadAccessCatalogs(db, config.llm);
+  validateSubmittedAccessListsOrThrow(
+    {
+      role,
+      collectionAccess: options.collectionAccess,
+      environmentAccess: options.environmentAccess,
+      llmModels: options.llmModels
+    },
+    catalogs
+  );
 
   const input: UpdateUserInput = {
     name: options.name,
     role: options.role,
     collectionAccess: access.collectionAccess,
     environmentAccess: access.environmentAccess,
-    llmAccess: options.llmAccess,
-    llmModels: options.llmModels,
+    llmAccess: llm.llmAccess,
+    llmModels: llm.llmModels,
     llmMonthlyTokenLimit:
       options.llmMonthlyTokens !== undefined ? options.llmMonthlyTokens : undefined
   };

@@ -41,6 +41,7 @@ import {
 } from '#/db/firestore/utils.js';
 import type { IDatabase } from '#/db/IDatabase.js';
 import { trimRequiredName } from '#/db/trimRequiredName.js';
+import { assertUserNameAvailable, assertUserNameNotReserved } from '#/db/userNameValidation.js';
 import type {
   ApiTokenRecord,
   AuditAction,
@@ -185,6 +186,7 @@ export class FirestoreDatabase implements IDatabase {
    */
   async createUser(input: CreateUserInput, actingUserId: string): Promise<UserRecord> {
     const trimmedName = trimRequiredName(input.name, 'User name');
+    assertUserNameNotReserved(trimmedName);
     const id = randomUUID();
     const now = new Date();
     const attributionUserId = trimmedName === SYSTEM_USER_NAME ? id : actingUserId;
@@ -272,6 +274,13 @@ export class FirestoreDatabase implements IDatabase {
 
     const name =
       input.name !== undefined ? trimRequiredName(input.name, 'User name') : existing.name;
+
+    if (name !== existing.name) {
+      assertUserNameNotReserved(name);
+      const duplicate = await this.findUserByName(name);
+      assertUserNameAvailable(name, id, duplicate);
+    }
+
     const role = input.role ?? existing.role;
     const collectionAccess = input.collectionAccess ?? existing.collectionAccess;
     const environmentAccess = input.environmentAccess ?? existing.environmentAccess;
@@ -312,8 +321,6 @@ export class FirestoreDatabase implements IDatabase {
    * @param actingUserId - User performing the delete action.
    */
   async deleteUser(id: string, actingUserId: string): Promise<void> {
-    await this.recordAuditEntry(actingUserId, 'delete', 'user', id);
-
     const client = this.requireClient();
     const tokenSnapshot = await client
       .collection(API_TOKENS_COLLECTION)
@@ -328,6 +335,8 @@ export class FirestoreDatabase implements IDatabase {
 
     batch.delete(client.collection(USERS_COLLECTION).doc(id));
     await batch.commit();
+
+    await this.recordAuditEntry(actingUserId, 'delete', 'user', id);
   }
 
   /**
@@ -449,6 +458,39 @@ export class FirestoreDatabase implements IDatabase {
     return snapshot.docs.map((doc) =>
       mapFirestoreApiToken(doc.id, doc.data() as FirestoreApiTokenDocument)
     );
+  }
+
+  /**
+   * Finds an API token record by stable identifier.
+   *
+   * @param id - Token identifier to look up.
+   */
+  async findApiTokenById(id: string): Promise<ApiTokenRecord | null> {
+    const docRef = this.requireClient().collection(API_TOKENS_COLLECTION).doc(id);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    return mapFirestoreApiToken(snapshot.id, snapshot.data() as FirestoreApiTokenDocument);
+  }
+
+  /**
+   * Permanently removes an API token record by id.
+   *
+   * @param id - Token identifier to delete.
+   * @param actingUserId - User performing the delete action.
+   */
+  async deleteApiToken(id: string, actingUserId: string): Promise<boolean> {
+    const docRef = this.requireClient().collection(API_TOKENS_COLLECTION).doc(id);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      return false;
+    }
+
+    await docRef.delete();
+    await this.recordAuditEntry(actingUserId, 'delete', 'api_token', id);
+    return true;
   }
 
   /**

@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import type { UserRecord } from '#/db/types.js';
+import type { ApiTokenRecord, UserRecord } from '#/db/types.js';
 import { userRoleSchema } from '#/server/routes/schemas/auth.js';
 import { timestampSchema } from '#/server/routes/schemas/common.js';
 import { listLlmModelsResponseSchema } from '#/server/routes/schemas/llm.js';
@@ -44,10 +44,17 @@ export const hubUserRecordSchema = z.object({
 });
 
 /**
+ * User record returned by `GET /admin/users`, including stale access warnings.
+ */
+export const adminUserListEntrySchema = hubUserRecordSchema.extend({
+  warnings: z.array(z.string())
+});
+
+/**
  * Response body schema for `GET /admin/users`.
  */
 export const listAdminUsersResponseSchema = z.object({
-  users: z.array(hubUserRecordSchema)
+  users: z.array(adminUserListEntrySchema)
 });
 
 /**
@@ -61,6 +68,63 @@ export const updateAdminUserBodySchema = z.object({
   llmAccess: z.boolean().optional(),
   llmModels: z.array(z.string()).optional(),
   llmMonthlyTokenLimit: z.number().int().nonnegative().nullable().optional()
+});
+
+/**
+ * Request body schema for `POST /admin/users`.
+ */
+export const createAdminUserBodySchema = z.object({
+  name: z.string().trim().min(1),
+  role: userRoleSchema,
+  collectionAccess: z.array(z.string()).optional(),
+  environmentAccess: z.array(z.string()).optional(),
+  llmAccess: z.boolean().optional(),
+  llmModels: z.array(z.string()).optional(),
+  llmMonthlyTokenLimit: z.number().int().nonnegative().nullable().optional()
+});
+
+/**
+ * API token metadata returned by admin token routes (never includes the secret hash).
+ */
+export const hubApiTokenRecordSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  name: z.string(),
+  tokenPrefix: z.string(),
+  createdAt: timestampSchema,
+  lastUsedAt: timestampSchema.nullable(),
+  revokedAt: timestampSchema.nullable()
+});
+
+/**
+ * Response body schema for `POST /admin/users`.
+ */
+export const createAdminUserResponseSchema = z.object({
+  user: hubUserRecordSchema,
+  token: hubApiTokenRecordSchema,
+  secret: z.string()
+});
+
+/**
+ * Request body schema for `POST /admin/users/:id/tokens`.
+ */
+export const createAdminTokenBodySchema = z.object({
+  name: z.string().trim().min(1)
+});
+
+/**
+ * Response body schema for `POST /admin/users/:id/tokens`.
+ */
+export const createdApiTokenResponseSchema = z.object({
+  token: hubApiTokenRecordSchema,
+  secret: z.string()
+});
+
+/**
+ * Response body schema for `GET /admin/tokens`.
+ */
+export const listAdminTokensResponseSchema = z.object({
+  tokens: z.array(hubApiTokenRecordSchema)
 });
 
 /**
@@ -81,5 +145,23 @@ export function serializeHubUser(user: UserRecord) {
     llmMonthlyTokenLimit: user.llmMonthlyTokenLimit,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString()
+  };
+}
+
+/**
+ * Serializes an API token record for JSON management API responses.
+ *
+ * @param token - Token record from the database layer.
+ * @returns Token metadata with ISO timestamp strings.
+ */
+export function serializeApiToken(token: ApiTokenRecord) {
+  return {
+    id: token.id,
+    userId: token.userId,
+    name: token.name,
+    tokenPrefix: token.tokenPrefix,
+    createdAt: token.createdAt.toISOString(),
+    lastUsedAt: token.lastUsedAt ? token.lastUsedAt.toISOString() : null,
+    revokedAt: token.revokedAt ? token.revokedAt.toISOString() : null
   };
 }

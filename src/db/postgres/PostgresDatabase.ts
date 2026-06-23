@@ -24,6 +24,7 @@ import { postgresConfigSchema } from '#/db/postgres/schemas.js';
 import type { PostgresDatabaseConfig } from '#/db/postgres/types.js';
 import { createSystemUserInput, SYSTEM_USER_NAME } from '#/db/systemUsers.js';
 import { trimRequiredName } from '#/db/trimRequiredName.js';
+import { assertUserNameAvailable, assertUserNameNotReserved } from '#/db/userNameValidation.js';
 import {
   API_TOKEN_SELECT_COLUMNS,
   AUDIT_LOG_SELECT_COLUMNS,
@@ -226,6 +227,7 @@ export class PostgresDatabase implements IDatabase {
    */
   async createUser(input: CreateUserInput, actingUserId: string): Promise<UserRecord> {
     const trimmedName = trimRequiredName(input.name, 'User name');
+    assertUserNameNotReserved(trimmedName);
     const id = randomUUID();
     const now = new Date();
 
@@ -316,6 +318,13 @@ export class PostgresDatabase implements IDatabase {
 
     const name =
       input.name !== undefined ? trimRequiredName(input.name, 'User name') : existing.name;
+
+    if (name !== existing.name) {
+      assertUserNameNotReserved(name);
+      const duplicate = await this.findUserByName(name);
+      assertUserNameAvailable(name, id, duplicate);
+    }
+
     const role = input.role ?? existing.role;
     const collectionAccess = input.collectionAccess ?? existing.collectionAccess;
     const environmentAccess = input.environmentAccess ?? existing.environmentAccess;
@@ -374,8 +383,6 @@ export class PostgresDatabase implements IDatabase {
    * @param actingUserId - User performing the delete action.
    */
   async deleteUser(id: string, actingUserId: string): Promise<void> {
-    await this.recordAuditEntry(actingUserId, 'delete', 'user', id);
-
     const client = await this.requirePool().connect();
     try {
       await client.query('BEGIN');
@@ -388,6 +395,8 @@ export class PostgresDatabase implements IDatabase {
     } finally {
       client.release();
     }
+
+    await this.recordAuditEntry(actingUserId, 'delete', 'user', id);
   }
 
   /**
@@ -508,6 +517,35 @@ export class PostgresDatabase implements IDatabase {
     );
 
     return result.rows.map(mapApiTokenSqlRow);
+  }
+
+  /**
+   * Finds an API token record by stable identifier.
+   *
+   * @param id - Token identifier to look up.
+   */
+  async findApiTokenById(id: string): Promise<ApiTokenRecord | null> {
+    const result = await this.query<ApiTokenSqlRow>(`${API_TOKEN_SELECT} WHERE id = $1 LIMIT 1`, [
+      id
+    ]);
+    const row = result.rows[0];
+    return row ? mapApiTokenSqlRow(row) : null;
+  }
+
+  /**
+   * Permanently removes an API token record by id.
+   *
+   * @param id - Token identifier to delete.
+   * @param actingUserId - User performing the delete action.
+   */
+  async deleteApiToken(id: string, actingUserId: string): Promise<boolean> {
+    const result = await this.query('DELETE FROM api_tokens WHERE id = $1', [id]);
+    const deleted = (result.rowCount ?? 0) > 0;
+    if (deleted) {
+      await this.recordAuditEntry(actingUserId, 'delete', 'api_token', id);
+    }
+
+    return deleted;
   }
 
   /**

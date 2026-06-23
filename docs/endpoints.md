@@ -152,11 +152,14 @@ Lists user accounts on the Team Hub server. The internal `system` account used f
       "llmModels": ["*"],
       "llmMonthlyTokenLimit": 100000,
       "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "updatedAt": "2026-01-01T00:00:00.000Z",
+      "warnings": []
     }
   ]
 }
 ```
+
+Each user entry includes a `warnings` array. When stored access lists reference collection, environment, or LLM model ids that no longer exist on the hub, warnings describe the stale references (for example `Unknown collection id "deleted-col".`). An empty array means all referenced ids are valid.
 
 **Response `403`:** Authenticated `user`-role token.
 
@@ -185,9 +188,15 @@ Updates a user account. The internal `system` account cannot be modified (403).
 }
 ```
 
-**Response `200`:** Updated user record (same shape as entries in `GET /admin/users`).
+**Response `200`:** Updated user record (same shape as a user entry in `GET /admin/users`, excluding the `warnings` field).
 
-**Response `400`:** Invalid access list (for example wildcard combined with specific ids).
+**Response `400`:** Invalid access list (for example wildcard combined with specific ids), unknown collection/environment/LLM model id in a submitted access list, or invalid user name. Example:
+
+```json
+{ "error": "Unknown collection id: missing-col." }
+```
+
+Only access lists explicitly included in the request body are validated against `GET /admin/collections`, `GET /admin/environments`, and `GET /admin/llm/models`. Partial updates that omit access fields leave existing stored access unchanged, even when those stored ids are stale.
 
 **Response `403`:** Authenticated `user`-role token, or attempt to modify the `system` account.
 
@@ -212,6 +221,135 @@ Deletes a user account and permanently removes all of their API tokens. The inte
 
 ```bash
 curl -s -X DELETE http://127.0.0.1:8788/admin/users/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer hbk_your_admin_token_here"
+```
+
+### POST /admin/users
+
+Creates a user account and an initial API bearer token. The plaintext token secret is returned once in the response and is not stored on the server.
+
+**Request body:**
+
+```json
+{
+  "name": "alice",
+  "role": "user",
+  "collectionAccess": ["*"],
+  "environmentAccess": ["*"],
+  "llmAccess": false,
+  "llmModels": [],
+  "llmMonthlyTokenLimit": null
+}
+```
+
+**Response `201`:**
+
+```json
+{
+  "user": { "id": "...", "name": "alice", "role": "user", "..." : "..." },
+  "token": {
+    "id": "...",
+    "userId": "...",
+    "name": "alice",
+    "tokenPrefix": "hbk_AbCd1234",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "lastUsedAt": null,
+    "revokedAt": null
+  },
+  "secret": "hbk_..."
+}
+```
+
+**Response `400`:** Invalid access lists, duplicate name, or unknown resource ids.
+
+**Response `403`:** Authenticated `user`-role token.
+
+```bash
+curl -s -X POST http://127.0.0.1:8788/admin/users \
+  -H "Authorization: Bearer hbk_your_admin_token_here" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"alice","role":"user","collectionAccess":["*"],"environmentAccess":["*"]}'
+```
+
+### GET /admin/tokens
+
+Lists all API bearer tokens across user accounts (metadata only; never includes secrets).
+
+**Response `200`:**
+
+```json
+{
+  "tokens": [
+    {
+      "id": "770e8400-e29b-41d4-a716-446655440002",
+      "userId": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Desktop",
+      "tokenPrefix": "hbk_AbCd1234",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "lastUsedAt": null,
+      "revokedAt": null
+    }
+  ]
+}
+```
+
+**Response `403`:** Authenticated `user`-role token.
+
+```bash
+curl -s http://127.0.0.1:8788/admin/tokens \
+  -H "Authorization: Bearer hbk_your_admin_token_here"
+```
+
+### POST /admin/users/:id/tokens
+
+Creates an additional API bearer token for an existing user account. The plaintext secret is returned once.
+
+**Request body:**
+
+```json
+{ "name": "Desktop" }
+```
+
+**Response `201`:**
+
+```json
+{
+  "token": {
+    "id": "...",
+    "userId": "...",
+    "name": "Desktop",
+    "tokenPrefix": "hbk_AbCd1234",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "lastUsedAt": null,
+    "revokedAt": null
+  },
+  "secret": "hbk_..."
+}
+```
+
+**Response `403`:** Authenticated `user`-role token, or attempt to create a token for the `system` account.
+
+**Response `404`:** Unknown user id.
+
+```bash
+curl -s -X POST http://127.0.0.1:8788/admin/users/550e8400-e29b-41d4-a716-446655440000/tokens \
+  -H "Authorization: Bearer hbk_your_admin_token_here" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Desktop"}'
+```
+
+### DELETE /admin/tokens/:id
+
+Permanently deletes an API bearer token by id. Tokens owned by the internal `system` account cannot be deleted (403).
+
+**Response `204`:** Token deleted.
+
+**Response `403`:** Authenticated `user`-role token, or attempt to delete a `system` account token.
+
+**Response `404`:** Unknown token id.
+
+```bash
+curl -s -X DELETE http://127.0.0.1:8788/admin/tokens/770e8400-e29b-41d4-a716-446655440002 \
   -H "Authorization: Bearer hbk_your_admin_token_here"
 ```
 

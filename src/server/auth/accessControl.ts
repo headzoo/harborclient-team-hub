@@ -165,7 +165,7 @@ export function filterAccessibleEnvironments(
  * @returns True when LLM access is enabled for the account.
  */
 export function canUseLlm(user: UserRecord): boolean {
-  return user.llmAccess;
+  return user.role !== 'admin' && user.llmAccess;
 }
 
 /**

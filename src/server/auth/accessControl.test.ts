@@ -159,6 +159,7 @@ describe('accessControl', () => {
 
     expect(canUseLlm(baseUser)).toBe(false);
     expect(canUseLlm(llmUser)).toBe(true);
+    expect(canUseLlm({ ...llmUser, role: 'admin' })).toBe(false);
     expect(isLlmModelAllowed(llmUser, 'gpt-4o')).toBe(true);
     expect(isLlmModelAllowed(llmUser, 'gpt-4o-mini')).toBe(false);
     expect(isLlmModelAllowed({ ...llmUser, llmModels: ['*'] }, 'gpt-4o-mini')).toBe(true);

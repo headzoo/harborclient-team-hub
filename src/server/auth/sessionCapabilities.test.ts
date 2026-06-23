@@ -75,4 +75,17 @@ describe('buildSessionPayload', () => {
       }
     });
   });
+
+  it('denies LLM capability for admin accounts even when llmAccess is stale', () => {
+    const adminUser: UserRecord = {
+      ...baseUser,
+      role: 'admin',
+      collectionAccess: [],
+      environmentAccess: [],
+      llmAccess: true,
+      llmModels: ['*']
+    };
+
+    expect(buildSessionPayload(adminUser, baseToken).capabilities.llm).toBe(false);
+  });
 });

@@ -2,18 +2,32 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { LlmConfig } from '#/config/llmConfig.js';
 import type { IDatabase } from '#/db/IDatabase.js';
+import type { UserRole } from '#/db/types.js';
 import { isSystemUser } from '#/db/systemUsers.js';
-import { buildAdminUserUpdateInput } from '#/server/admin/userValidation.js';
+import {
+  buildAccessCatalogIds,
+  buildAccessListWarnings,
+  buildAdminUserCreateInput,
+  buildAdminUserUpdateInput,
+  validateSubmittedAccessLists
+} from '#/server/admin/userValidation.js';
 import { canUseManagementApi } from '#/server/auth/accessControl.js';
+import { generateApiToken } from '#/server/auth/apiTokens.js';
 import { listHubOfferedModels } from '#/server/llm/models.js';
-import { handleDbError } from '#/server/routes/errors.js';
+import { handleDbError, handleValidationError } from '#/server/routes/errors.js';
 import { denyUnlessAllowed, requireAuthenticatedUser } from '#/server/routes/authorize.js';
 import {
+  createAdminTokenBodySchema,
+  createAdminUserBodySchema,
+  createAdminUserResponseSchema,
+  createdApiTokenResponseSchema,
   hubUserRecordSchema,
   listAdminCollectionsResponseSchema,
   listAdminEnvironmentsResponseSchema,
   listAdminLlmModelsResponseSchema,
+  listAdminTokensResponseSchema,
   listAdminUsersResponseSchema,
+  serializeApiToken,
   serializeHubUser,
   updateAdminUserBodySchema
 } from '#/server/routes/schemas/admin.js';
@@ -68,6 +82,56 @@ function denySystemUserTarget(
 }
 
 /**
+ * Returns 403 when the target account is the authenticated operator.
+ *
+ * @param reply - Fastify reply used to send error payloads.
+ * @param targetUserId - User id from the route parameter.
+ * @param actorUserId - Authenticated operator performing the action.
+ * @returns True when the request was denied and a response was sent.
+ */
+function denySelfUserTarget(
+  reply: Parameters<typeof denyUnlessAllowed>[0],
+  targetUserId: string,
+  actorUserId: string
+): boolean {
+  if (targetUserId !== actorUserId) {
+    return false;
+  }
+
+  void reply.code(403).send(errorResponseSchema.parse({ error: 'Forbidden' }));
+  return true;
+}
+
+/**
+ * Returns 403 when an operator attempts to change their own role.
+ *
+ * @param reply - Fastify reply used to send error payloads.
+ * @param targetUserId - User id from the route parameter.
+ * @param actorUserId - Authenticated operator performing the action.
+ * @param existingRole - Current role stored for the target account.
+ * @param requestedRole - Role from the request body, when provided.
+ * @returns True when the request was denied and a response was sent.
+ */
+function denySelfRoleChange(
+  reply: Parameters<typeof denyUnlessAllowed>[0],
+  targetUserId: string,
+  actorUserId: string,
+  existingRole: UserRole,
+  requestedRole: UserRole | undefined
+): boolean {
+  if (targetUserId !== actorUserId) {
+    return false;
+  }
+
+  if (requestedRole === undefined || requestedRole === existingRole) {
+    return false;
+  }
+
+  void reply.code(403).send(errorResponseSchema.parse({ error: 'Forbidden' }));
+  return true;
+}
+
+/**
  * Registers bearer-protected management routes for operator accounts.
  *
  * @param app - Encapsulated Fastify scope with auth applied.
@@ -85,7 +149,8 @@ export async function registerAdminRoutes(
     url: '/admin/users',
     schema: {
       response: {
-        200: listAdminUsersResponseSchema
+        200: listAdminUsersResponseSchema,
+        403: errorResponseSchema
       }
     },
     /**
@@ -99,14 +164,94 @@ export async function registerAdminRoutes(
         }
 
         const systemUserId = db.getSystemUserId();
-        const users = (await db.listUsers()).filter(
-          (record) => !isSystemUser(record, systemUserId)
+        const [users, collections, environments] = await Promise.all([
+          db.listUsers(),
+          db.listCollections(),
+          db.listEnvironments()
+        ]);
+        const catalogs = buildAccessCatalogIds(
+          collections,
+          environments,
+          llm ? listHubOfferedModels(llm).map((model) => model.id) : null
         );
+
         return reply.send({
-          users: users.map((record) => serializeHubUser(record))
+          users: users
+            .filter((record) => !isSystemUser(record, systemUserId))
+            .map((record) => ({
+              ...serializeHubUser(record),
+              warnings: buildAccessListWarnings(
+                {
+                  collectionAccess: record.collectionAccess,
+                  environmentAccess: record.environmentAccess,
+                  llmModels: record.llmModels
+                },
+                catalogs
+              )
+            }))
         });
       } catch (error) {
         if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'POST',
+    url: '/admin/users',
+    schema: {
+      body: createAdminUserBodySchema,
+      response: {
+        201: createAdminUserResponseSchema,
+        400: errorResponseSchema,
+        403: errorResponseSchema
+      }
+    },
+    /**
+     * Creates a user account and an initial API bearer token.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const input = buildAdminUserCreateInput(request.body);
+        const [collections, environments] = await Promise.all([
+          db.listCollections(),
+          db.listEnvironments()
+        ]);
+        const catalogs = buildAccessCatalogIds(
+          collections,
+          environments,
+          llm ? listHubOfferedModels(llm).map((model) => model.id) : null
+        );
+        validateSubmittedAccessLists(
+          {
+            role: request.body.role,
+            collectionAccess: request.body.collectionAccess,
+            environmentAccess: request.body.environmentAccess,
+            llmModels: request.body.llmModels
+          },
+          catalogs
+        );
+
+        const created = await db.createUser(input, user.id);
+        const { record, secret } = generateApiToken(created.id, created.name);
+        await db.createApiToken(record, user.id);
+
+        return reply.code(201).send({
+          user: serializeHubUser(created),
+          token: serializeApiToken(record),
+          secret
+        });
+      } catch (error) {
+        if (handleValidationError(reply, error) || handleDbError(reply, error)) {
           return;
         }
 
@@ -254,11 +399,37 @@ export async function registerAdminRoutes(
           return;
         }
 
+        if (
+          denySelfRoleChange(reply, request.params.id, user.id, existing.role, request.body.role)
+        ) {
+          return;
+        }
+
         const input = buildAdminUserUpdateInput(existing, request.body);
+        const role = request.body.role ?? existing.role;
+        const [collections, environments] = await Promise.all([
+          db.listCollections(),
+          db.listEnvironments()
+        ]);
+        const catalogs = buildAccessCatalogIds(
+          collections,
+          environments,
+          llm ? listHubOfferedModels(llm).map((model) => model.id) : null
+        );
+        validateSubmittedAccessLists(
+          {
+            role,
+            collectionAccess: request.body.collectionAccess,
+            environmentAccess: request.body.environmentAccess,
+            llmModels: request.body.llmModels
+          },
+          catalogs
+        );
+
         const updated = await db.updateUser(request.params.id, input, user.id);
         return reply.send(serializeHubUser(updated));
       } catch (error) {
-        if (handleDbError(reply, error)) {
+        if (handleValidationError(reply, error) || handleDbError(reply, error)) {
           return;
         }
 
@@ -299,7 +470,145 @@ export async function registerAdminRoutes(
           return;
         }
 
+        if (denySelfUserTarget(reply, request.params.id, user.id)) {
+          return;
+        }
+
         await db.deleteUser(request.params.id, user.id);
+        return reply.code(204).send(null);
+      } catch (error) {
+        if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'GET',
+    url: '/admin/tokens',
+    schema: {
+      response: {
+        200: listAdminTokensResponseSchema,
+        403: errorResponseSchema
+      }
+    },
+    /**
+     * Lists all API bearer tokens for operator administration.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const tokens = await db.listApiTokens();
+        return reply.send({
+          tokens: tokens.map((record) => serializeApiToken(record))
+        });
+      } catch (error) {
+        if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'POST',
+    url: '/admin/users/:id/tokens',
+    schema: {
+      params: idParamSchema,
+      body: createAdminTokenBodySchema,
+      response: {
+        201: createdApiTokenResponseSchema,
+        400: errorResponseSchema,
+        403: errorResponseSchema,
+        404: errorResponseSchema
+      }
+    },
+    /**
+     * Creates an additional API bearer token for a user account.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const systemUserId = db.getSystemUserId();
+        const existing = await db.findUserById(request.params.id);
+        if (!existing) {
+          void reply.code(404).send(errorResponseSchema.parse({ error: 'User not found' }));
+          return;
+        }
+
+        if (denySystemUserTarget(reply, existing, systemUserId)) {
+          return;
+        }
+
+        const { record, secret } = generateApiToken(existing.id, request.body.name);
+        await db.createApiToken(record, user.id);
+
+        return reply.code(201).send({
+          token: serializeApiToken(record),
+          secret
+        });
+      } catch (error) {
+        if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'DELETE',
+    url: '/admin/tokens/:id',
+    schema: {
+      params: idParamSchema,
+      response: {
+        204: emptyResponseSchema,
+        403: errorResponseSchema,
+        404: errorResponseSchema
+      }
+    },
+    /**
+     * Permanently deletes an API bearer token by id.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const systemUserId = db.getSystemUserId();
+        const existing = await db.findApiTokenById(request.params.id);
+        if (!existing) {
+          void reply.code(404).send(errorResponseSchema.parse({ error: 'Token not found' }));
+          return;
+        }
+
+        const owner = await db.findUserById(existing.userId);
+        if (owner && denySystemUserTarget(reply, owner, systemUserId)) {
+          return;
+        }
+
+        const deleted = await db.deleteApiToken(request.params.id, user.id);
+        if (!deleted) {
+          void reply.code(404).send(errorResponseSchema.parse({ error: 'Token not found' }));
+          return;
+        }
+
         return reply.code(204).send(null);
       } catch (error) {
         if (handleDbError(reply, error)) {
