@@ -291,7 +291,8 @@ ${sampleDbSection}${sampleRedisSection}`);
         database: 'harbor'
       },
       redis: sampleRedisConfig,
-      llm: null
+      llm: null,
+      plugins: null
     });
     expect(createServerMock).toHaveBeenCalledWith(
       {
@@ -306,7 +307,8 @@ ${sampleDbSection}${sampleRedisSection}`);
           database: 'harbor'
         },
         redis: sampleRedisConfig,
-        llm: null
+        llm: null,
+        plugins: null
       },
       { verbose: true, db, throttleStore }
     );
@@ -322,7 +324,8 @@ ${sampleDbSection}${sampleRedisSection}`);
         database: 'harbor'
       },
       redis: sampleRedisConfig,
-      llm: null
+      llm: null,
+      plugins: null
     });
 
     log.mockRestore();
@@ -354,7 +357,8 @@ describe('runServer', () => {
           database: 'harbor'
         },
         redis: sampleRedisConfig,
-        llm: null
+        llm: null,
+        plugins: null
       },
       { db, throttleStore }
     );
@@ -372,7 +376,8 @@ describe('runServer', () => {
           database: 'harbor'
         },
         redis: sampleRedisConfig,
-        llm: null
+        llm: null,
+        plugins: null
       },
       { verbose: undefined, db, throttleStore }
     );

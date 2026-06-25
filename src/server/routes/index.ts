@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { LlmConfig } from '#/config/llmConfig.js';
+import type { PluginsConfig } from '#/config/pluginsConfig.js';
 import type { IDatabase } from '#/db/IDatabase.js';
 import type { IThrottleStore } from '#/server/auth/throttle/IThrottleStore.js';
 import { registerAdminRoutes } from '#/server/routes/admin.js';
@@ -10,6 +11,7 @@ import { registerFolderRoutes } from '#/server/routes/folders.js';
 import { registerHealthRoute } from '#/server/routes/health.js';
 import { registerRequestRoutes } from '#/server/routes/requests.js';
 import { registerLlmRoutes } from '#/server/routes/llm.js';
+import { registerPluginsRoutes } from '#/server/routes/plugins.js';
 import {
   createBearerAuthHook,
   registerBearerAuthDecorator
@@ -35,6 +37,11 @@ export interface RegisterRoutesOptions {
    * Normalized LLM configuration from server.yaml, or null when unset.
    */
   llm: LlmConfig | null;
+
+  /**
+   * Normalized plugin source configuration from server.yaml, or null when unset.
+   */
+  plugins: PluginsConfig | null;
 }
 
 /**
@@ -70,6 +77,7 @@ export async function registerProtectedRoutes(
   await registerFolderRoutes(app, options.db);
   await registerRequestRoutes(app, options.db);
   await registerLlmRoutes(app, { db: options.db, llm: options.llm });
+  await registerPluginsRoutes(app, { plugins: options.plugins });
 }
 
 /**

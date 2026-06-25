@@ -53,7 +53,8 @@ ${sampleDbSection}${sampleRedisSection}`);
         host: '127.0.0.1',
         port: 6380
       },
-      llm: null
+      llm: null,
+      plugins: null
     });
   });
 
@@ -78,7 +79,8 @@ ${sampleDbSection}${sampleRedisSection}`);
         host: '127.0.0.1',
         port: 6380
       },
-      llm: null
+      llm: null,
+      plugins: null
     });
   });
 
@@ -114,8 +116,59 @@ ${sampleDbSection}${sampleRedisSection}llm:
           openai: { apiKey: 'sk-test' }
         },
         models: ['gpt-4o']
+      },
+      plugins: null
+    });
+  });
+
+  it('loads an optional plugins section', () => {
+    const configPath = writeConfig(`server:
+  port: 8787
+  host: 127.0.0.1
+${sampleDbSection}${sampleRedisSection}plugins:
+  catalogs:
+    - https://harborclient.com/plugin_catalog.json
+    - https://example.com/catalog.json
+  trusted:
+    - https://harborclient.com/plugins/trusted.json
+`);
+
+    expect(loadServerConfig(configPath)).toEqual({
+      port: 8787,
+      host: '127.0.0.1',
+      db: {
+        driver: 'postgres',
+        host: '127.0.0.1',
+        port: 5432,
+        user: 'harbor',
+        password: 'harbor',
+        database: 'harbor'
+      },
+      redis: {
+        host: '127.0.0.1',
+        port: 6380
+      },
+      llm: null,
+      plugins: {
+        catalogs: [
+          'https://harborclient.com/plugin_catalog.json',
+          'https://example.com/catalog.json'
+        ],
+        trusted: ['https://harborclient.com/plugins/trusted.json']
       }
     });
+  });
+
+  it('throws on invalid plugins URLs', () => {
+    const configPath = writeConfig(`server:
+  port: 8787
+  host: 127.0.0.1
+${sampleDbSection}${sampleRedisSection}plugins:
+  catalogs:
+    - not-a-url
+`);
+
+    expect(() => loadServerConfig(configPath)).toThrow(ConfigError);
   });
 
   it('throws when the config file is missing', () => {

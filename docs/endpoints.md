@@ -29,11 +29,11 @@ Failed requests return a JSON body:
 { "error": "Human-readable message" }
 ```
 
-| Status | When |
-| ------ | ---- |
-| `400` | Validation failure or missing required field |
-| `401` | Missing, malformed, unknown, or revoked bearer token |
-| `404` | Entity not found |
+| Status | When                                                 |
+| ------ | ---------------------------------------------------- |
+| `400`  | Validation failure or missing required field         |
+| `401`  | Missing, malformed, unknown, or revoked bearer token |
+| `404`  | Entity not found                                     |
 
 ### Empty responses
 
@@ -116,11 +116,11 @@ Use this route to discover whether a token belongs to a `user` or `admin` accoun
 }
 ```
 
-| Capability | `user` role | `admin` role |
-| ---------- | ----------- | ------------ |
-| `dataApi` | `true` | `false` |
-| `managementApi` | `false` | `true` |
-| `llm` | `true` when `llmAccess` is enabled | `false` |
+| Capability      | `user` role                        | `admin` role |
+| --------------- | ---------------------------------- | ------------ |
+| `dataApi`       | `true`                             | `false`      |
+| `managementApi` | `false`                            | `true`       |
+| `llm`           | `true` when `llmAccess` is enabled | `false`      |
 
 **Response `401`:** Missing, malformed, unknown, or revoked bearer token.
 
@@ -246,7 +246,7 @@ Creates a user account and an initial API bearer token. The plaintext token secr
 
 ```json
 {
-  "user": { "id": "...", "name": "alice", "role": "user", "..." : "..." },
+  "user": { "id": "...", "name": "alice", "role": "user", "...": "..." },
   "token": {
     "id": "...",
     "userId": "...",
@@ -361,9 +361,7 @@ Lists all collections as lightweight `{ id, name }` records for operator user ma
 
 ```json
 {
-  "collections": [
-    { "id": "550e8400-e29b-41d4-a716-446655440000", "name": "Shared API" }
-  ]
+  "collections": [{ "id": "550e8400-e29b-41d4-a716-446655440000", "name": "Shared API" }]
 }
 ```
 
@@ -382,9 +380,7 @@ Lists all environments as lightweight `{ id, name }` records for operator user m
 
 ```json
 {
-  "environments": [
-    { "id": "660e8400-e29b-41d4-a716-446655440001", "name": "Production" }
-  ]
+  "environments": [{ "id": "660e8400-e29b-41d4-a716-446655440001", "name": "Production" }]
 }
 ```
 
@@ -422,7 +418,11 @@ Collections are top-level workspaces that hold folders, saved requests, and coll
   "name": "Shared API",
   "variables": [],
   "headers": [],
-  "auth": { "type": "none", "basic": { "username": "", "password": "" }, "bearer": { "token": "" } },
+  "auth": {
+    "type": "none",
+    "basic": { "username": "", "password": "" },
+    "bearer": { "token": "" }
+  },
   "preRequestScript": "",
   "postRequestScript": "",
   "createdAt": "2026-01-01T00:00:00.000Z"
@@ -438,7 +438,11 @@ Lists all collections ordered by name. Results are filtered by the authenticated
 **Response `200`:**
 
 ```json
-{ "collections": [ /* collection records */ ] }
+{
+  "collections": [
+    /* collection records */
+  ]
+}
 ```
 
 ```bash
@@ -528,7 +532,11 @@ Lists all environments ordered by name.
 **Response `200`:**
 
 ```json
-{ "environments": [ /* environment records */ ] }
+{
+  "environments": [
+    /* environment records */
+  ]
+}
 ```
 
 ```bash
@@ -570,7 +578,9 @@ Updates an environment's name and variables.
 ```json
 {
   "name": "Production",
-  "variables": [{ "key": "baseUrl", "value": "https://api.example.com", "defaultValue": "", "share": false }]
+  "variables": [
+    { "key": "baseUrl", "value": "https://api.example.com", "defaultValue": "", "share": false }
+  ]
 }
 ```
 
@@ -615,7 +625,11 @@ Lists folders in a collection ordered by sort order, then name.
 **Response `200`:**
 
 ```json
-{ "folders": [ /* folder records */ ] }
+{
+  "folders": [
+    /* folder records */
+  ]
+}
 ```
 
 ```bash
@@ -710,7 +724,11 @@ Saved requests store HTTP method, URL, headers, params, body, scripts, and optio
   "url": "https://api.example.com/users",
   "headers": [],
   "params": [],
-  "auth": { "type": "none", "basic": { "username": "", "password": "" }, "bearer": { "token": "" } },
+  "auth": {
+    "type": "none",
+    "basic": { "username": "", "password": "" },
+    "bearer": { "token": "" }
+  },
   "body": "",
   "bodyType": "none",
   "preRequestScript": "",
@@ -734,7 +752,11 @@ Lists saved requests in a collection.
 **Response `200`:**
 
 ```json
-{ "requests": [ /* saved request records */ ] }
+{
+  "requests": [
+    /* saved request records */
+  ]
+}
 ```
 
 ```bash
@@ -757,7 +779,11 @@ Creates a new saved request in a collection.
   "url": "https://api.example.com/users",
   "headers": [],
   "params": [],
-  "auth": { "type": "none", "basic": { "username": "", "password": "" }, "bearer": { "token": "" } },
+  "auth": {
+    "type": "none",
+    "basic": { "username": "", "password": "" },
+    "bearer": { "token": "" }
+  },
   "body": "",
   "bodyType": "none",
   "preRequestScript": "",
@@ -798,7 +824,11 @@ Updates an existing saved request by id.
   "url": "https://api.example.com/users",
   "headers": [],
   "params": [],
-  "auth": { "type": "none", "basic": { "username": "", "password": "" }, "bearer": { "token": "" } },
+  "auth": {
+    "type": "none",
+    "basic": { "username": "", "password": "" },
+    "bearer": { "token": "" }
+  },
   "body": "",
   "bodyType": "none",
   "preRequestScript": "",
@@ -928,9 +958,7 @@ Runs one stateless LLM completion step using hub-configured provider keys.
 ```json
 {
   "model": "gpt-4o",
-  "messages": [
-    { "role": "user", "content": "Hello" }
-  ],
+  "messages": [{ "role": "user", "content": "Hello" }],
   "systemPrompt": "You are HarborClient assistant.",
   "tools": []
 }
@@ -961,3 +989,34 @@ Runs one stateless LLM completion step using hub-configured provider keys.
 **Response `403`:** User lacks LLM access or the requested model is not allowed.
 
 **Response `503`:** LLM support is not configured on the hub.
+
+## Plugin sources
+
+Team Hubs can declare plugin marketplace catalog and trusted-publisher URLs in `server.yaml` under the optional `plugins` section. HarborClient merges these into **Settings → Plugins** as read-only endpoints for connected users.
+
+Configure in `server.yaml`:
+
+```yaml
+plugins:
+  catalogs:
+    - https://harborclient.com/plugin_catalog.json
+  trusted:
+    - https://harborclient.com/plugins/trusted.json
+```
+
+### `GET /plugins/sources`
+
+Returns plugin catalog and trusted-publisher URLs configured on this Team Hub.
+
+**Auth:** Bearer token required (any authenticated user).
+
+**Response `200`:**
+
+```json
+{
+  "catalogs": ["https://harborclient.com/plugin_catalog.json"],
+  "trusted": ["https://harborclient.com/plugins/trusted.json"]
+}
+```
+
+When the `plugins` section is omitted from `server.yaml`, both arrays are empty.

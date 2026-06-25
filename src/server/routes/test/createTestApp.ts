@@ -75,6 +75,11 @@ export interface CreateProtectedTestAppOptions {
    * LLM configuration passed to protected routes; defaults to null (LLM disabled).
    */
   llm?: import('#/config/llmConfig.js').LlmConfig | null;
+
+  /**
+   * Plugin source configuration passed to protected routes; defaults to null.
+   */
+  plugins?: import('#/config/pluginsConfig.js').PluginsConfig | null;
 }
 
 /**
@@ -104,7 +109,8 @@ export async function createProtectedTestApp(
       version: '0.1.0',
       db: options.db,
       throttleStore,
-      llm: options.llm ?? null
+      llm: options.llm ?? null,
+      plugins: options.plugins ?? null
     });
   });
 

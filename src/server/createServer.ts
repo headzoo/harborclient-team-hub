@@ -56,7 +56,8 @@ export async function createServer(
     version: options.version ?? readPackageVersion(),
     db: options.db,
     throttleStore: options.throttleStore,
-    llm: config.llm
+    llm: config.llm,
+    plugins: config.plugins
   });
 
   return app;

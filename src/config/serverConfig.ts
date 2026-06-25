@@ -3,9 +3,11 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { ZodError } from 'zod/v4';
 import { normalizeLlmConfig, type LlmConfig } from '#/config/llmConfig.js';
+import { normalizePluginsConfig, type PluginsConfig } from '#/config/pluginsConfig.js';
 import {
   dbSectionSchema,
   llmSectionSchema,
+  pluginsSectionSchema,
   redisSectionSchema,
   serverConfigDocumentSchema,
   serverSectionSchema
@@ -41,6 +43,11 @@ export interface ServerConfig {
    * Normalized LLM provider settings when the optional `llm` section is present.
    */
   llm: LlmConfig | null;
+
+  /**
+   * Normalized plugin source URLs when the optional `plugins` section is present.
+   */
+  plugins: PluginsConfig | null;
 }
 
 /**
@@ -189,12 +196,22 @@ function parseServerConfig(document: unknown): ServerConfig {
     llm = normalizeLlmConfig(parsedLlmSection.data);
   }
 
+  let plugins: PluginsConfig | null = null;
+  if (root.plugins !== undefined) {
+    const parsedPluginsSection = pluginsSectionSchema.safeParse(root.plugins);
+    if (!parsedPluginsSection.success) {
+      throw new ConfigError(formatZodError(parsedPluginsSection.error));
+    }
+    plugins = normalizePluginsConfig(parsedPluginsSection.data);
+  }
+
   return {
     port: parsedDocument.data.server.port,
     host: parsedDocument.data.server.host,
     db: parsedDbSection.data as Record<string, unknown>,
     redis: parsedRedisSection.data as Record<string, unknown>,
-    llm
+    llm,
+    plugins
   };
 }
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add optional plugins configuration and routes for plugin sources. (`9b591ec`)
+
 ## 0.2.1 - 2026-06-24
 
 - Refactor constructor formatting in database classes. (`8382066`)

@@ -102,13 +102,22 @@ export const llmSectionSchema = z.object({
 });
 
 /**
+ * Zod schema for the optional `plugins` section of the config file.
+ */
+export const pluginsSectionSchema = z.object({
+  catalogs: z.array(z.string().trim().url()).optional(),
+  trusted: z.array(z.string().trim().url()).optional()
+});
+
+/**
  * Zod schema for the full server config document (`server.yaml` root mapping).
  */
 export const serverConfigDocumentSchema = z.object({
   server: serverSectionSchema,
   db: dbSectionSchema,
   redis: redisSectionSchema,
-  llm: llmSectionSchema.optional()
+  llm: llmSectionSchema.optional(),
+  plugins: pluginsSectionSchema.optional()
 });
 
 /**
@@ -120,3 +129,8 @@ export type ServerConfigDocument = z.infer<typeof serverConfigDocumentSchema>;
  * Validated shape of the optional llm section.
  */
 export type LlmSection = z.infer<typeof llmSectionSchema>;
+
+/**
+ * Validated shape of the optional plugins section.
+ */
+export type PluginsSection = z.infer<typeof pluginsSectionSchema>;

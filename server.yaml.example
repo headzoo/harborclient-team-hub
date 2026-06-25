@@ -72,3 +72,13 @@ redis:
 #     - claude-3-5-haiku-20241022
 #     - gemini-1.5-pro
 #     - gemini-1.5-flash
+
+# Optional plugin source URLs for HarborClient. Omit this section to return empty lists.
+# Authenticated HarborClient instances merge these read-only endpoints into Settings → Plugins.
+#
+# plugins:
+#   catalogs:
+#     - https://harborclient.com/plugin_catalog.json
+#     - https://example.com/custom-catalog.json
+#   trusted:
+#     - https://harborclient.com/plugins/trusted.json
