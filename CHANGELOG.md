@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add logging configuration support in Docker setup. (`953dcec`)
+
 ## 0.2.2 - 2026-06-26
 
 - Add logging configuration support and update documentation. (`f661b0d`)

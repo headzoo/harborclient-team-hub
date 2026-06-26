@@ -45,6 +45,9 @@ ENV PORT=8080 \
   TEAM_HUB_DB_DATABASE=harbor \
   TEAM_HUB_REDIS_HOST=127.0.0.1 \
   TEAM_HUB_REDIS_PORT=6379 \
+  TEAM_HUB_LOGGING_LEVEL=info \
+  TEAM_HUB_LOGGING_FILE=/var/log/team-hub/team-hub.log \
+  TEAM_HUB_LOGGING_CONSOLE=true \
   PGDATA=/var/lib/postgresql/data
 
 COPY --from=builder /app/dist ./dist

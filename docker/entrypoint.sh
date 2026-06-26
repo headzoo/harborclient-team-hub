@@ -15,6 +15,9 @@ export TEAM_HUB_DB_PASSWORD="${TEAM_HUB_DB_PASSWORD:-harbor}"
 export TEAM_HUB_DB_DATABASE="${TEAM_HUB_DB_DATABASE:-harbor}"
 export TEAM_HUB_REDIS_HOST="${TEAM_HUB_REDIS_HOST:-127.0.0.1}"
 export TEAM_HUB_REDIS_PORT="${TEAM_HUB_REDIS_PORT:-6379}"
+export TEAM_HUB_LOGGING_LEVEL="${TEAM_HUB_LOGGING_LEVEL:-info}"
+export TEAM_HUB_LOGGING_FILE="${TEAM_HUB_LOGGING_FILE:-/var/log/team-hub/team-hub.log}"
+export TEAM_HUB_LOGGING_CONSOLE="${TEAM_HUB_LOGGING_CONSOLE:-true}"
 
 PGDATA="${PGDATA:-/var/lib/postgresql/data}"
 SUPERVISOR_CONF="/etc/team-hub/supervisord.generated.conf"
@@ -67,7 +70,7 @@ fi
 mkdir -p /etc/team-hub /var/log/team-hub /var/run/team-hub
 chmod 755 /var/log/team-hub /var/run/team-hub
 
-envsubst '${TEAM_HUB_PORT} ${TEAM_HUB_HOST} ${TEAM_HUB_DB_DRIVER} ${TEAM_HUB_DB_HOST} ${TEAM_HUB_DB_PORT} ${TEAM_HUB_DB_USER} ${TEAM_HUB_DB_PASSWORD} ${TEAM_HUB_DB_DATABASE} ${TEAM_HUB_REDIS_HOST} ${TEAM_HUB_REDIS_PORT}' \
+envsubst '${TEAM_HUB_PORT} ${TEAM_HUB_HOST} ${TEAM_HUB_DB_DRIVER} ${TEAM_HUB_DB_HOST} ${TEAM_HUB_DB_PORT} ${TEAM_HUB_DB_USER} ${TEAM_HUB_DB_PASSWORD} ${TEAM_HUB_DB_DATABASE} ${TEAM_HUB_REDIS_HOST} ${TEAM_HUB_REDIS_PORT} ${TEAM_HUB_LOGGING_LEVEL} ${TEAM_HUB_LOGGING_FILE} ${TEAM_HUB_LOGGING_CONSOLE}' \
   < /docker/server.yaml.template > "${TEAM_HUB_CONFIG}"
 
 envsubst '${PORT} ${TEAM_HUB_PORT}' \

@@ -384,6 +384,11 @@ Use `/health` for manual checks and uptime monitoring. The response includes `st
 | `TEAM_HUB_DB_DATABASE` | `harbor` | Database name |
 | `TEAM_HUB_REDIS_HOST` | `127.0.0.1` | Redis host |
 | `TEAM_HUB_REDIS_PORT` | `6379` | Redis port |
+| `TEAM_HUB_LOGGING_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `TEAM_HUB_LOGGING_FILE` | `/var/log/team-hub/team-hub.log` | Log file path |
+| `TEAM_HUB_LOGGING_CONSOLE` | `true` | Write logs to the terminal |
+
+Logging env vars are applied at process startup. Restart the container after changing them.
 
 ## Troubleshooting
 

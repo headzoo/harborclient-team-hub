@@ -212,8 +212,11 @@ The all-in-one Docker image renders `/etc/team-hub/server.yaml` from environment
 | `TEAM_HUB_DB_DATABASE` | `harbor` | `db.database` |
 | `TEAM_HUB_REDIS_HOST` | `127.0.0.1` | `redis.host` |
 | `TEAM_HUB_REDIS_PORT` | `6379` | `redis.port` |
+| `TEAM_HUB_LOGGING_LEVEL` | `info` | `logging.level` |
+| `TEAM_HUB_LOGGING_FILE` | `/var/log/team-hub/team-hub.log` | `logging.file` |
+| `TEAM_HUB_LOGGING_CONSOLE` | `true` | `logging.console` |
 
-`llm`, `plugins`, and `logging` are not generated from environment variables in the default template. Mount a custom `server.yaml` or extend deployment tooling for those sections. See [Deploy](./deploy.md).
+`llm` and `plugins` are not generated from environment variables in the default template. Mount a custom `server.yaml` or extend deployment tooling for those sections. Logging applies at process startup — restart the container after changing logging env vars. See [Deploy](./deploy.md).
 
 ## Related docs
 
