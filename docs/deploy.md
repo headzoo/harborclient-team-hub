@@ -247,15 +247,39 @@ This guide covers HTTP on port `8080` only. Add a reverse proxy and TLS on the h
 
 ### Install Docker
 
-Follow your provider's guide or the [OVHcloud: Install Docker and Docker Compose on a VPS](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/virtual-private-servers/install-docker-on-vps) tutorial. Summary:
+Follow your provider's guide or the [OVHcloud: Install Docker and Docker Compose on a VPS](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/virtual-private-servers/install-docker-on-vps) tutorial. These instructions are for Ubuntu 22.04.
+
+Summary:
 
 1. Update the system: `sudo apt update && sudo apt upgrade -y`
 2. Install dependencies: `sudo apt install -y ca-certificates curl gnupg`
 3. Add Docker's official GPG key and apt repository (Debian or Ubuntu variant from the guide).
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y ca-certificates curl gnupg
+
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+```
+
 4. Install Docker Engine and the Compose plugin:
 
 ```bash
-sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 
@@ -273,6 +297,7 @@ Verify:
 ```bash
 docker --version
 docker compose version
+sudo docker run hello-world
 ```
 
 ### Build the image
@@ -295,9 +320,9 @@ Start the container in the background with a persistent volume and restart polic
 docker run -d \
   --name team-hub \
   --restart unless-stopped \
-  -p 8080:8080 \
+  -p 80:8080 \
   -v team-hub-pgdata:/var/lib/postgresql/data \
-  -e TEAM_HUB_DB_PASSWORD='choose-a-strong-password' \
+  -e TEAM_HUB_DB_PASSWORD='6l9gN8CUeRySg5fssEra9E' \
   team-hub:latest
 ```
 
@@ -311,22 +336,58 @@ Check logs during first boot (migrations and Postgres init can take 30–60 seco
 docker logs -f team-hub
 ```
 
-### Verify and create admin
+### Verify and create users
 
 Confirm health from the VPS or your workstation (replace `VPS_IP`):
 
 ```bash
-curl -s http://VPS_IP:8080/health
+curl -s http://VPS_IP/health
 ```
 
 Expect JSON like `{"status":"ok","version":"..."}`.
 
-Create the first admin account — see [Create an admin user](#create-an-admin-user), using `team-hub` as the container name:
+Team Hub has no default users — create an admin account first, then add `user`-role accounts for HarborClient desktop clients.
+
+#### Create an admin
+
+Create the first admin account for operator tasks (management API, further user administration). Replace `ops` with the display name you want.
+
+The command creates the user, issues an initial API bearer token, and prints the one-time `hbk_…` secret. **Copy the token immediately**; it will not be shown again.
 
 ```bash
 docker exec -it team-hub \
   node /app/dist/cli.js -c /etc/team-hub/server.yaml user create --name ops --role admin
 ```
+
+Example output:
+
+```text
+Created user "ops" (<user-id>) with role admin.
+...
+Store this token now; it will not be shown again:
+hbk_...
+```
+
+#### Create a user
+
+Create a `user`-role account for a HarborClient desktop client. Replace `alice` with the team member's display name. Use `--collection-access` and `--environment-access` to scope what they can sync; `*` grants all resources of that type.
+
+```bash
+docker exec -it team-hub \
+  node /app/dist/cli.js -c /etc/team-hub/server.yaml user create --name alice --role user \
+  --collection-access '*' --environment-access '*'
+```
+
+The command prints a one-time `hbk_…` bearer token — give it to the team member for their HarborClient team hub connection. Store it immediately; it will not be shown again.
+
+Confirm accounts exist:
+
+```bash
+docker exec -it team-hub \
+  node /app/dist/cli.js -c /etc/team-hub/server.yaml user list
+```
+
+Connect HarborClient to your Team Hub URL (for the example above, `http://VPS_IP` on port `80`). See [Create an admin user](#create-an-admin-user), [Authentication](./auth.md), and [CLI — user create](./cli.md#user-create) for access scoping, additional tokens, and other admin tasks.
 
 ### Persistence and backups
 
@@ -339,15 +400,15 @@ For disaster recovery:
 
 ### Firewall
 
-Allow inbound HTTP to the mapped port. On Ubuntu with UFW:
+Allow inbound HTTP to the mapped port. On Ubuntu with UFW (for the example above, host port `80`):
 
 ```bash
-sudo ufw allow 8080/tcp
+sudo ufw allow 80/tcp
 sudo ufw enable
 sudo ufw status
 ```
 
-If your provider has a network firewall in their control panel (OVH included), open the same port there. Clients reach Team Hub at `http://VPS_IP:8080` until you add TLS.
+If your provider has a network firewall in their control panel (OVH included), open the same port there. Clients reach Team Hub at `http://VPS_IP` until you add TLS.
 
 ### Updates
 
@@ -362,13 +423,46 @@ docker rm team-hub
 docker run -d \
   --name team-hub \
   --restart unless-stopped \
-  -p 8080:8080 \
+  -p 80:8080 \
   -v team-hub-pgdata:/var/lib/postgresql/data \
   -e TEAM_HUB_DB_PASSWORD='choose-a-strong-password' \
   team-hub:latest
 ```
 
 The entrypoint runs migrations on each start, so schema updates apply automatically.
+
+### Edit configuration
+
+The running config file is `/etc/team-hub/server.yaml` inside the container. The entrypoint generates it from environment variables on **container create**; after that you can edit it directly for settings such as `llm:`, `plugins:`, or `logging:`.
+
+Open the file with `nano` (included in the image):
+
+```bash
+docker exec -it team-hub nano /etc/team-hub/server.yaml
+```
+
+In `nano`: edit the YAML, then press `Ctrl+O` to save, `Enter` to confirm, and `Ctrl+X` to exit.
+
+See [Configuration](./configuration.md) and [`server.yaml.example`](https://github.com/harborclient/team-hub/blob/main/server.yaml.example) for valid sections and keys. Common VPS edits include adding an `llm:` block or changing `logging.level`.
+
+Apply changes without recreating the container:
+
+- **`db`**, **`redis`**, **`llm`**, **`plugins`** — reload while Team Hub is running (replace `hbk_…` with an admin token):
+
+  ```bash
+  docker exec team-hub curl -s -X POST http://127.0.0.1:8787/admin/config/reload \
+    -H "Authorization: Bearer hbk_your_admin_token_here"
+  ```
+
+- **`logging`** or **`server.host` / `server.port`** — restart the Team Hub process:
+
+  ```bash
+  docker exec team-hub /docker/restart-team-hub.sh
+  ```
+
+See [Reload config without restarting](#reload-config-without-restarting) for the full reload behavior and response shape.
+
+**Important:** `docker restart team-hub` or recreating the container with `docker run` **regenerates** `/etc/team-hub/server.yaml` from environment variables and **overwrites** manual edits. To change `db`, `redis`, or logging defaults persistently, either keep editing the yaml after each recreate or pass the matching `TEAM_HUB_*` env vars in `docker run`.
 
 ### VPS troubleshooting
 

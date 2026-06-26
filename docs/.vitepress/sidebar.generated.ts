@@ -138,8 +138,8 @@ export const sidebar: DefaultTheme.SidebarItem[] =
             "link": "/deploy#run-team-hub"
           },
           {
-            "text": "Verify and create admin",
-            "link": "/deploy#verify-and-create-admin"
+            "text": "Verify and create users",
+            "link": "/deploy#verify-and-create-users"
           },
           {
             "text": "Persistence and backups",
@@ -152,6 +152,10 @@ export const sidebar: DefaultTheme.SidebarItem[] =
           {
             "text": "Updates",
             "link": "/deploy#updates"
+          },
+          {
+            "text": "Edit configuration",
+            "link": "/deploy#edit-configuration"
           },
           {
             "text": "VPS troubleshooting",
