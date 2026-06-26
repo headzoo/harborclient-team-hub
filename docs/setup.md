@@ -23,7 +23,7 @@ For local development, start Postgres and Redis with Docker Compose:
 docker compose up -d
 ```
 
-For a ready-to-run container (Nginx, Team Hub, Postgres, and Redis) or Cloud Run deployment, see [Deploy](./deploy.md).
+For a ready-to-run container (Nginx, Team Hub, Postgres, and Redis) or Docker deployment (Cloud Run, VPS, and other hosts), see [Deploy](./deploy.md).
 
 Apply database migrations before starting the server or running admin commands:
 

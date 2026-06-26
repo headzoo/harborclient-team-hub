@@ -64,32 +64,136 @@ export const sidebar: DefaultTheme.SidebarItem[] =
     "link": "/deploy",
     "items": [
       {
+        "text": "Hosting options",
+        "link": "/deploy#hosting-options"
+      },
+      {
         "text": "What is in the container",
-        "link": "/deploy#what-is-in-the-container"
-      },
-      {
-        "text": "Prerequisites",
-        "link": "/deploy#prerequisites"
-      },
-      {
-        "text": "Build and push the image",
-        "link": "/deploy#build-and-push-the-image"
+        "link": "/deploy#what-is-in-the-container",
+        "items": [
+          {
+            "text": "Bundled vs managed services",
+            "link": "/deploy#bundled-vs-managed-services"
+          }
+        ],
+        "collapsed": false
       },
       {
         "text": "Local smoke test",
         "link": "/deploy#local-smoke-test"
       },
       {
-        "text": "Quick start on Cloud Run (evaluation)",
-        "link": "/deploy#quick-start-on-cloud-run-evaluation"
+        "text": "Google Cloud Run",
+        "link": "/deploy#google-cloud-run",
+        "items": [
+          {
+            "text": "Prerequisites",
+            "link": "/deploy#prerequisites"
+          },
+          {
+            "text": "Build and push the image",
+            "link": "/deploy#build-and-push-the-image"
+          },
+          {
+            "text": "Quick start (evaluation)",
+            "link": "/deploy#quick-start-evaluation"
+          },
+          {
+            "text": "Production",
+            "link": "/deploy#production"
+          },
+          {
+            "text": "Admin commands",
+            "link": "/deploy#admin-commands"
+          },
+          {
+            "text": "Cloud Run troubleshooting",
+            "link": "/deploy#cloud-run-troubleshooting"
+          }
+        ],
+        "collapsed": false
       },
       {
-        "text": "Production on Cloud Run",
-        "link": "/deploy#production-on-cloud-run"
+        "text": "VPS",
+        "link": "/deploy#vps",
+        "items": [
+          {
+            "text": "Overview",
+            "link": "/deploy#overview"
+          },
+          {
+            "text": "Prerequisites",
+            "link": "/deploy#prerequisites-1"
+          },
+          {
+            "text": "Install Docker",
+            "link": "/deploy#install-docker"
+          },
+          {
+            "text": "Build the image",
+            "link": "/deploy#build-the-image"
+          },
+          {
+            "text": "Run Team Hub",
+            "link": "/deploy#run-team-hub"
+          },
+          {
+            "text": "Verify and create admin",
+            "link": "/deploy#verify-and-create-admin"
+          },
+          {
+            "text": "Persistence and backups",
+            "link": "/deploy#persistence-and-backups"
+          },
+          {
+            "text": "Firewall",
+            "link": "/deploy#firewall"
+          },
+          {
+            "text": "Updates",
+            "link": "/deploy#updates"
+          },
+          {
+            "text": "VPS troubleshooting",
+            "link": "/deploy#vps-troubleshooting"
+          }
+        ],
+        "collapsed": false
       },
       {
         "text": "Using the CLI in the container",
-        "link": "/deploy#using-the-cli-in-the-container"
+        "link": "/deploy#using-the-cli-in-the-container",
+        "items": [
+          {
+            "text": "Where the config file lives",
+            "link": "/deploy#where-the-config-file-lives"
+          },
+          {
+            "text": "How to invoke the CLI",
+            "link": "/deploy#how-to-invoke-the-cli"
+          },
+          {
+            "text": "Running commands from your host",
+            "link": "/deploy#running-commands-from-your-host"
+          },
+          {
+            "text": "Running commands inside the container",
+            "link": "/deploy#running-commands-inside-the-container"
+          },
+          {
+            "text": "Reload config without restarting",
+            "link": "/deploy#reload-config-without-restarting"
+          },
+          {
+            "text": "Restart the server after config changes",
+            "link": "/deploy#restart-the-server-after-config-changes"
+          },
+          {
+            "text": "Create an admin user",
+            "link": "/deploy#create-an-admin-user"
+          }
+        ],
+        "collapsed": false
       },
       {
         "text": "Post-deploy administration",
@@ -105,7 +209,30 @@ export const sidebar: DefaultTheme.SidebarItem[] =
       },
       {
         "text": "Troubleshooting",
-        "link": "/deploy#troubleshooting"
+        "link": "/deploy#troubleshooting",
+        "items": [
+          {
+            "text": "Container exits during startup",
+            "link": "/deploy#container-exits-during-startup-2"
+          },
+          {
+            "text": "GET /health fails or connection refused",
+            "link": "/deploy#get-health-fails-or-connection-refused"
+          },
+          {
+            "text": "Protected API routes return 503",
+            "link": "/deploy#protected-api-routes-return-503"
+          },
+          {
+            "text": "Config file not found",
+            "link": "/deploy#config-file-not-found"
+          },
+          {
+            "text": "Migration errors",
+            "link": "/deploy#migration-errors-1"
+          }
+        ],
+        "collapsed": false
       },
       {
         "text": "Related docs",

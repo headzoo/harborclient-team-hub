@@ -1,8 +1,17 @@
 # Deploy
 
-Team Hub ships as an all-in-one Docker image: **Nginx** (public entrypoint), the **Team Hub API**, **Postgres** (default database), and **Redis** (authentication throttling). The image listens on `$PORT` (default `8080`) so it works on platforms such as **GCP Cloud Run** that inject a port at runtime.
+Team Hub ships as an all-in-one Docker image: **Nginx** (public entrypoint), the **Team Hub API**, **Postgres** (default database), and **Redis** (authentication throttling). The image listens on `$PORT` (default `8080`), which works on managed platforms that inject a port at runtime and on a plain VPS where you map host port `8080` to the container.
 
 For local development without the full image, you can still run Postgres and Redis via [`docker compose up -d`](../docker-compose.yml) and start Team Hub on the host — see [Setup](./setup.md).
+
+## Hosting options
+
+Pick a hosting guide for your environment:
+
+- [Google Cloud Run](#google-cloud-run) — serverless deploy with managed Postgres and Redis for production
+- [VPS](#vps) — self-hosted Linux server with persistent Docker volumes (OVH and other providers)
+
+More hosting guides may be added over time.
 
 ## What is in the container
 
@@ -24,53 +33,13 @@ Health checks should use `GET /health` (proxied through Nginx).
 
 ### Bundled vs managed services
 
-The default image starts Postgres and Redis inside the container. That is convenient for demos, smoke tests, and self-hosted Docker.
+The default image starts Postgres and Redis inside the container. That is convenient for demos, smoke tests, and self-hosted Docker with a persistent volume.
 
-**Cloud Run storage is ephemeral.** Bundled Postgres data is lost when the revision is redeployed or the instance is recycled. For production on Cloud Run, disable bundled services and use **Cloud SQL** (Postgres) and **Memorystore** (Redis) instead. See [Production on Cloud Run](#production-on-cloud-run) below.
-
-## Prerequisites
-
-- Docker installed locally
-- A GCP project with billing enabled (for Cloud Run)
-- [`gcloud`](https://cloud.google.com/sdk/docs/install) CLI authenticated to your project
-- An Artifact Registry repository (or legacy Container Registry)
-
-Enable required APIs:
-
-```bash
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com
-```
-
-Create an Artifact Registry repo (once per project/region):
-
-```bash
-gcloud artifacts repositories create team-hub \
-  --repository-format=docker \
-  --location=REGION
-```
-
-## Build and push the image
-
-From the repository root:
-
-```bash
-export PROJECT_ID=your-gcp-project
-export REGION=us-central1
-export IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/team-hub/team-hub:latest"
-
-docker build -t "${IMAGE}" .
-docker push "${IMAGE}"
-```
-
-Configure Docker to authenticate with Artifact Registry if needed:
-
-```bash
-gcloud auth configure-docker "${REGION}-docker.pkg.dev"
-```
+For production, you can either mount a volume for bundled Postgres (typical on a [VPS](#vps)) or disable bundled services and point Team Hub at external Postgres and Redis (required on [Google Cloud Run](#google-cloud-run), where container storage is ephemeral).
 
 ## Local smoke test
 
-Run the image locally before pushing:
+Run the image locally before deploying to any host:
 
 ```bash
 docker build -t team-hub:local .
@@ -98,7 +67,51 @@ docker run --rm -p 8080:8080 \
 
 After the container is running, use the CLI to create an admin user — see [Using the CLI in the container](#using-the-cli-in-the-container).
 
-## Quick start on Cloud Run (evaluation)
+## Google Cloud Run
+
+Deploy Team Hub to [Google Cloud Run](https://cloud.google.com/run) when you want a managed, scale-to-zero HTTP service. Cloud Run container storage is **ephemeral** — bundled Postgres data is lost when the revision is redeployed or the instance is recycled. Use bundled services only for evaluation; for production, disable them and use **Cloud SQL** (Postgres) and **Memorystore** (Redis).
+
+### Prerequisites
+
+- Docker installed locally
+- A GCP project with billing enabled
+- [`gcloud`](https://cloud.google.com/sdk/docs/install) CLI authenticated to your project
+- An Artifact Registry repository (or legacy Container Registry)
+
+Enable required APIs:
+
+```bash
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com
+```
+
+Create an Artifact Registry repo (once per project/region):
+
+```bash
+gcloud artifacts repositories create team-hub \
+  --repository-format=docker \
+  --location=REGION
+```
+
+### Build and push the image
+
+From the repository root:
+
+```bash
+export PROJECT_ID=your-gcp-project
+export REGION=us-central1
+export IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/team-hub/team-hub:latest"
+
+docker build -t "${IMAGE}" .
+docker push "${IMAGE}"
+```
+
+Configure Docker to authenticate with Artifact Registry if needed:
+
+```bash
+gcloud auth configure-docker "${REGION}-docker.pkg.dev"
+```
+
+### Quick start (evaluation)
 
 Deploy with bundled Postgres and Redis for a quick trial. **Do not rely on this for production data** — use managed services instead.
 
@@ -122,11 +135,11 @@ After deploy, open the service URL and verify health:
 curl -s "$(gcloud run services describe team-hub --region "${REGION}" --format='value(status.url)')/health"
 ```
 
-## Production on Cloud Run
+### Production
 
 For production, point Team Hub at managed Postgres and Redis and disable the bundled processes.
 
-### Environment variables
+#### Environment variables
 
 | Variable | Production value | Notes |
 | -------- | ---------------- | ----- |
@@ -158,7 +171,7 @@ gcloud run deploy team-hub \
   --vpc-connector "projects/PROJECT/locations/REGION/connectors/CONNECTOR"
 ```
 
-### Cloud SQL (Postgres)
+#### Cloud SQL (Postgres)
 
 1. Create a Cloud SQL Postgres instance.
 2. Create a database and user for Team Hub.
@@ -170,7 +183,7 @@ Run migrations before serving traffic. Options:
 - Deploy once with a [Cloud Run Job](https://cloud.google.com/run/docs/create-jobs) that runs `node dist/cli.js -c /etc/team-hub/server.yaml migrate` with the same env and Cloud SQL attachment.
 - Run migrate from a one-off `docker run` on a machine that can reach the database.
 
-### Memorystore (Redis)
+#### Memorystore (Redis)
 
 Team Hub requires Redis for [authentication throttling](./auth.md). Protected routes return **503** when Redis is unreachable.
 
@@ -178,13 +191,200 @@ Team Hub requires Redis for [authentication throttling](./auth.md). Protected ro
 2. Configure a [Serverless VPC Access connector](https://cloud.google.com/vpc/docs/configure-serverless-vpc-access).
 3. Attach the connector to the Cloud Run service and set `TEAM_HUB_REDIS_HOST` to the instance IP.
 
-### Firestore (alternative database)
+#### Firestore (alternative database)
 
 To use Firestore instead of Postgres, set `TEAM_HUB_DB_DRIVER=firestore` and mount a service account key (or use workload identity). You still need Redis. See `server.yaml.example` at the repository root for the Firestore config shape; map fields to env vars or mount a custom `server.yaml` at `/etc/team-hub/server.yaml` via a volume (advanced).
 
-### LLM provider keys
+#### LLM provider keys
 
 Optional LLM proxy settings are not generated from env vars in the default template. For hub-proxied LLM access, mount a config file with an `llm` section or extend deployment tooling. See [LLM](./llm.md) and `server.yaml.example` at the repository root.
+
+### Admin commands
+
+On Cloud Run there is no long-lived shell to `exec` into. Run admin commands with a [Cloud Run Job](https://cloud.google.com/run/docs/create-jobs) or a one-off task using the same image, environment variables, and secrets as the service — for example `node /app/dist/cli.js -c /etc/team-hub/server.yaml migrate` or `user create`.
+
+### Cloud Run troubleshooting
+
+#### Container exits during startup
+
+Check Cloud Run logs. Common causes:
+
+- **Insufficient memory** — bundled Postgres + Redis + Node need at least **2 GiB** for evaluation deploys.
+- **Postgres init failure** — without a volume, first boot should still succeed but data is ephemeral.
+
+#### Migration errors
+
+- Ensure the database user can create tables.
+- For Cloud SQL, confirm the Cloud SQL Auth proxy / Unix socket attachment is configured.
+
+#### Stale data after redeploy
+
+Expected when using bundled Postgres. Switch to Cloud SQL for durable storage.
+
+## VPS
+
+Run Team Hub on a plain Linux VPS when you want a simple, always-on server with persistent storage. The bundled Postgres and Redis processes are a good fit on a VPS **when you mount a Docker volume** for `/var/lib/postgresql/data` — unlike Cloud Run, data survives container restarts and image updates.
+
+The steps below use a generic Debian or Ubuntu VPS. [OVHcloud](https://www.ovhcloud.com/) is a common choice; their [Docker install guide](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/virtual-private-servers/install-docker-on-vps) matches the checklist here.
+
+### Overview
+
+On a VPS you typically:
+
+1. Install Docker on the host.
+2. Build the Team Hub image on the server (or copy a pre-built image).
+3. Run the container with a named volume, restart policy, and a strong database password.
+4. Open the HTTP port in the host firewall.
+5. Create an admin user via `docker exec`.
+
+This guide covers HTTP on port `8080` only. Add a reverse proxy and TLS on the host in a follow-up if you need HTTPS.
+
+### Prerequisites
+
+- A VPS with at least **2 GiB RAM** (bundled Postgres, Redis, and Node need headroom)
+- SSH access with a user that has `sudo` privileges
+- Debian 11/12 or Ubuntu 22.04 and later
+
+### Install Docker
+
+Follow your provider's guide or the [OVHcloud: Install Docker and Docker Compose on a VPS](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/virtual-private-servers/install-docker-on-vps) tutorial. Summary:
+
+1. Update the system: `sudo apt update && sudo apt upgrade -y`
+2. Install dependencies: `sudo apt install -y ca-certificates curl gnupg`
+3. Add Docker's official GPG key and apt repository (Debian or Ubuntu variant from the guide).
+4. Install Docker Engine and the Compose plugin:
+
+```bash
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+5. Add your user to the `docker` group so you can run Docker without `sudo`:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+Avoid running routine Docker commands with `sudo` — root-owned files in volumes can cause permission errors later.
+
+Verify:
+
+```bash
+docker --version
+docker compose version
+```
+
+### Build the image
+
+There is no published container registry image yet — build from source on the VPS (or build locally and transfer the image with `docker save` / `docker load`).
+
+On the VPS:
+
+```bash
+git clone https://github.com/harborclient/team-hub.git
+cd team-hub
+docker build -t team-hub:latest .
+```
+
+### Run Team Hub
+
+Start the container in the background with a persistent volume and restart policy:
+
+```bash
+docker run -d \
+  --name team-hub \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v team-hub-pgdata:/var/lib/postgresql/data \
+  -e TEAM_HUB_DB_PASSWORD='choose-a-strong-password' \
+  team-hub:latest
+```
+
+- `--restart unless-stopped` brings the container back after a host reboot.
+- The named volume keeps Postgres data across container recreates. See [Local smoke test](#local-smoke-test) for how volumes work.
+- Set `TEAM_HUB_DB_PASSWORD` to a strong secret before exposing the service publicly.
+
+Check logs during first boot (migrations and Postgres init can take 30–60 seconds):
+
+```bash
+docker logs -f team-hub
+```
+
+### Verify and create admin
+
+Confirm health from the VPS or your workstation (replace `VPS_IP`):
+
+```bash
+curl -s http://VPS_IP:8080/health
+```
+
+Expect JSON like `{"status":"ok","version":"..."}`.
+
+Create the first admin account — see [Create an admin user](#create-an-admin-user), using `team-hub` as the container name:
+
+```bash
+docker exec -it team-hub \
+  node /app/dist/cli.js -c /etc/team-hub/server.yaml user create --name ops --role admin
+```
+
+### Persistence and backups
+
+The `team-hub-pgdata` volume survives `docker stop`, `docker rm`, and image rebuilds as long as you reuse the same volume name in `docker run`.
+
+For disaster recovery:
+
+- Enable provider snapshots if available (for example OVH VPS snapshots).
+- Periodically back up the volume data or use `pg_dump` from inside the container.
+
+### Firewall
+
+Allow inbound HTTP to the mapped port. On Ubuntu with UFW:
+
+```bash
+sudo ufw allow 8080/tcp
+sudo ufw enable
+sudo ufw status
+```
+
+If your provider has a network firewall in their control panel (OVH included), open the same port there. Clients reach Team Hub at `http://VPS_IP:8080` until you add TLS.
+
+### Updates
+
+To deploy a new version while keeping data:
+
+```bash
+cd team-hub
+git pull
+docker build -t team-hub:latest .
+docker stop team-hub
+docker rm team-hub
+docker run -d \
+  --name team-hub \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v team-hub-pgdata:/var/lib/postgresql/data \
+  -e TEAM_HUB_DB_PASSWORD='choose-a-strong-password' \
+  team-hub:latest
+```
+
+The entrypoint runs migrations on each start, so schema updates apply automatically.
+
+### VPS troubleshooting
+
+#### Connection refused from outside the VPS
+
+- Confirm the container is running: `docker ps`
+- Check UFW and the provider network firewall allow port `8080`.
+- Verify Nginx is listening: `curl -s http://127.0.0.1:8080/health` on the VPS itself.
+
+#### Container exits during startup
+
+Check `docker logs team-hub`. Bundled Postgres + Redis + Node need at least **2 GiB** RAM.
+
+#### Postgres init or permission errors
+
+Ensure `PGDATA` (`/var/lib/postgresql/data`) is on a writable volume. If you previously ran Docker with `sudo`, fix volume ownership or recreate the volume.
 
 ## Using the CLI in the container
 
@@ -346,10 +546,6 @@ docker exec -it CONTAINER \
 
 See [Authentication](./auth.md) for token usage and [CLI — Examples](./cli.md#examples) for other admin tasks.
 
-### Cloud Run
-
-On Cloud Run there is no long-lived shell to `exec` into. Run admin commands with a [Cloud Run Job](https://cloud.google.com/run/docs/create-jobs) or a one-off task using the same image, environment variables, and secrets as the service — for example `node /app/dist/cli.js -c /etc/team-hub/server.yaml migrate` or `user create`.
-
 ## Post-deploy administration
 
 Most day-two tasks use the CLI patterns above: always pass `-c /etc/team-hub/server.yaml` before the subcommand, and invoke `node /app/dist/cli.js` from `/app`. After editing config, [restart Team Hub](#restart-the-server-after-config-changes) before expecting new settings to apply. Common follow-ups after creating a user:
@@ -362,7 +558,7 @@ See [CLI](./cli.md) and [Authentication](./auth.md) for full reference.
 
 ## Health checks
 
-Cloud Run sends traffic to `$PORT`. Nginx proxies to Team Hub’s `GET /health` endpoint.
+Nginx listens on `$PORT` and proxies to Team Hub's `GET /health` endpoint.
 
 Use `/health` for manual checks and uptime monitoring. The response includes `status: "ok"` and the application version.
 
@@ -370,7 +566,7 @@ Use `/health` for manual checks and uptime monitoring. The response includes `st
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `PORT` | `8080` | Nginx listen port (set by Cloud Run) |
+| `PORT` | `8080` | Nginx listen port (some platforms inject this at runtime) |
 | `TEAM_HUB_PORT` | `8787` | Internal Team Hub port |
 | `TEAM_HUB_HOST` | `127.0.0.1` | Team Hub bind address |
 | `TEAM_HUB_CONFIG` | `/etc/team-hub/server.yaml` | Generated config path |
@@ -392,12 +588,14 @@ Logging env vars are applied at process startup. Restart the container after cha
 
 ## Troubleshooting
 
+Platform-specific issues are covered under [Cloud Run troubleshooting](#cloud-run-troubleshooting) and [VPS troubleshooting](#vps-troubleshooting).
+
 ### Container exits during startup
 
-Check Cloud Run logs or `docker logs`. Common causes:
+Check `docker logs CONTAINER` or your platform's log viewer. Common causes:
 
-- **Insufficient memory** — bundled Postgres + Redis + Node need at least **2 GiB** for evaluation deploys.
-- **Postgres init failure** — ensure `PGDATA` (`/var/lib/postgresql/data`) is writable; on Cloud Run without a volume, first boot should still succeed but data is ephemeral.
+- **Insufficient memory** — bundled Postgres + Redis + Node need at least **2 GiB**.
+- **Postgres init failure** — ensure `PGDATA` (`/var/lib/postgresql/data`) is writable.
 
 ### `GET /health` fails or connection refused
 
@@ -406,7 +604,7 @@ Check Cloud Run logs or `docker logs`. Common causes:
 
 ### Protected API routes return 503
 
-Redis is required for auth throttling. Verify Redis is running (bundled) or reachable (Memorystore + VPC connector). See [Authentication](./auth.md).
+Redis is required for auth throttling. Verify Redis is running (bundled) or reachable (external Redis). See [Authentication](./auth.md).
 
 ### Config file not found
 
@@ -422,11 +620,6 @@ If `/etc/team-hub/server.yaml` itself is missing, the container likely failed du
 
 - Ensure the database user can create tables.
 - Run `team-hub migrate` manually with the same config the server uses.
-- For Cloud SQL, confirm the Cloud SQL Auth proxy / Unix socket attachment is configured.
-
-### Stale data after redeploy on Cloud Run
-
-Expected when using bundled Postgres. Switch to Cloud SQL for durable storage.
 
 ## Related docs
 

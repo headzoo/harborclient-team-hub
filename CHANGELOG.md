@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Update deployment documentation and sidebar navigation. (`0d09def`)
 - Add logging configuration support in Docker setup. (`953dcec`)
 
 ## 0.2.2 - 2026-06-26

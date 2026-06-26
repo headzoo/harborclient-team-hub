@@ -221,6 +221,6 @@ The all-in-one Docker image renders `/etc/team-hub/server.yaml` from environment
 ## Related docs
 
 - [Setup](./setup.md) — install, migrate, and start the server
-- [Deploy](./deploy.md) — Docker, Cloud Run, config reload, and env var reference
+- [Deploy](./deploy.md) — Docker image, hosting guides, config reload, and env var reference
 - [Authentication](./auth.md) — bearer tokens and Redis throttling
 - [LLM](./llm.md) — user access and usage limits
