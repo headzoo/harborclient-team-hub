@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Include deletion_locked in PostgresDatabase collection test mock row.. (`96c4641`)
 - Preserve Docker server.yaml across container restarts.. (`d457773`)
 
 ## 0.2.3 - 2026-06-26
