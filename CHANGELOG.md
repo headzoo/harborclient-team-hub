@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.3 - 2026-06-26
+
 - Implement deletion lock feature for collections and environments. (`bbdd197`)
 - Update deployment documentation for Docker installation and user management. (`5ceb95d`)
 - Update deployment documentation and sidebar navigation. (`0d09def`)
