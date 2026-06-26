@@ -179,6 +179,11 @@ export interface FirestoreCollectionDocument {
    * User who last updated the collection.
    */
   updatedByUserId: string | null;
+
+  /**
+   * When true, non-admin users cannot delete this collection.
+   */
+  deletionLocked?: boolean;
 }
 
 /**
@@ -214,6 +219,11 @@ export interface FirestoreEnvironmentDocument {
    * User who last updated the environment.
    */
   updatedByUserId: string | null;
+
+  /**
+   * When true, non-admin users cannot delete this environment.
+   */
+  deletionLocked?: boolean;
 }
 
 /**

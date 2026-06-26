@@ -24,7 +24,8 @@ describe('mapCollectionSqlRow', () => {
       created_at: createdAt,
       updated_at: updatedAt,
       created_by_user_id: 'user-1',
-      updated_by_user_id: 'user-1'
+      updated_by_user_id: 'user-1',
+      deletion_locked: false
     });
 
     expect(record).toEqual({
@@ -42,7 +43,8 @@ describe('mapCollectionSqlRow', () => {
       createdAt,
       updatedAt,
       createdByUserId: 'user-1',
-      updatedByUserId: 'user-1'
+      updatedByUserId: 'user-1',
+      deletionLocked: false
     });
   });
 });
@@ -60,7 +62,8 @@ describe('mapEnvironmentSqlRow', () => {
       created_at: createdAt,
       updated_at: updatedAt,
       created_by_user_id: 'user-1',
-      updated_by_user_id: 'user-2'
+      updated_by_user_id: 'user-2',
+      deletion_locked: true
     });
 
     expect(record).toEqual({
@@ -70,7 +73,8 @@ describe('mapEnvironmentSqlRow', () => {
       createdAt,
       updatedAt,
       createdByUserId: 'user-1',
-      updatedByUserId: 'user-2'
+      updatedByUserId: 'user-2',
+      deletionLocked: true
     });
   });
 });

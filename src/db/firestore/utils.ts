@@ -163,7 +163,8 @@ export function mapFirestoreCollection(
     createdAt: data.createdAt,
     updatedAt: data.updatedAt ?? data.createdAt,
     createdByUserId: data.createdByUserId ?? null,
-    updatedByUserId: data.updatedByUserId ?? null
+    updatedByUserId: data.updatedByUserId ?? null,
+    deletionLocked: data.deletionLocked ?? false
   };
 }
 
@@ -185,7 +186,8 @@ export function mapFirestoreEnvironment(
     createdAt: data.createdAt,
     updatedAt: data.updatedAt ?? data.createdAt,
     createdByUserId: data.createdByUserId ?? null,
-    updatedByUserId: data.updatedByUserId ?? null
+    updatedByUserId: data.updatedByUserId ?? null,
+    deletionLocked: data.deletionLocked ?? false
   };
 }
 

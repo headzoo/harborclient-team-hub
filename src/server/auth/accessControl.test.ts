@@ -5,7 +5,10 @@ import {
   canAccessEnvironment,
   canCreateCollection,
   canCreateEnvironment,
+  canDeleteCollection,
+  canDeleteEnvironment,
   canListCollections,
+  canListEnvironments,
   canUseDataApi,
   canUseManagementApi,
   isAdmin,
@@ -59,7 +62,8 @@ const sampleCollections: CollectionRecord[] = [
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     createdByUserId: null,
-    updatedByUserId: null
+    updatedByUserId: null,
+    deletionLocked: false
   },
   {
     id: 'collection-b',
@@ -72,7 +76,8 @@ const sampleCollections: CollectionRecord[] = [
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     createdByUserId: null,
-    updatedByUserId: null
+    updatedByUserId: null,
+    deletionLocked: false
   }
 ];
 
@@ -84,7 +89,8 @@ const sampleEnvironments: EnvironmentRecord[] = [
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     createdByUserId: null,
-    updatedByUserId: null
+    updatedByUserId: null,
+    deletionLocked: false
   },
   {
     id: 'env-b',
@@ -93,7 +99,8 @@ const sampleEnvironments: EnvironmentRecord[] = [
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     createdByUserId: null,
-    updatedByUserId: null
+    updatedByUserId: null,
+    deletionLocked: false
   }
 ];
 
@@ -124,10 +131,25 @@ describe('accessControl', () => {
     expect(canAccessEnvironment(wildcardUser, 'env-b')).toBe(true);
   });
 
-  it('allows list collections for user and admin roles', () => {
+  it('allows list collections and environments for user and admin roles', () => {
     expect(canListCollections(adminUser)).toBe(true);
     expect(canListCollections(baseUser)).toBe(true);
     expect(canListCollections(wildcardUser)).toBe(true);
+    expect(canListEnvironments(adminUser)).toBe(true);
+    expect(canListEnvironments(baseUser)).toBe(true);
+    expect(canListEnvironments(wildcardUser)).toBe(true);
+  });
+
+  it('allows delete only when access is granted and deletion is not locked', () => {
+    expect(canDeleteCollection(baseUser, sampleCollections[0])).toBe(true);
+    expect(canDeleteCollection(baseUser, { ...sampleCollections[0], deletionLocked: true })).toBe(
+      false
+    );
+    expect(canDeleteCollection(adminUser, sampleCollections[0])).toBe(false);
+    expect(canDeleteEnvironment(baseUser, sampleEnvironments[0])).toBe(true);
+    expect(canDeleteEnvironment(baseUser, { ...sampleEnvironments[0], deletionLocked: true })).toBe(
+      false
+    );
   });
 
   it('allows create only for wildcard users', () => {
@@ -140,11 +162,12 @@ describe('accessControl', () => {
   });
 
   it('filters list results by access', () => {
-    expect(filterAccessibleCollections(adminUser, sampleCollections)).toEqual([]);
+    expect(filterAccessibleCollections(adminUser, sampleCollections)).toEqual(sampleCollections);
     expect(filterAccessibleCollections(baseUser, sampleCollections)).toEqual([
       sampleCollections[0]
     ]);
     expect(filterAccessibleCollections(wildcardUser, sampleCollections)).toEqual(sampleCollections);
+    expect(filterAccessibleEnvironments(adminUser, sampleEnvironments)).toEqual(sampleEnvironments);
     expect(filterAccessibleEnvironments(baseUser, sampleEnvironments)).toEqual([
       sampleEnvironments[0]
     ]);

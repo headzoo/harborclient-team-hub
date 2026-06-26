@@ -9,7 +9,31 @@ import { listLlmModelsResponseSchema } from '#/server/routes/schemas/llm.js';
  */
 export const adminResourceOptionSchema = z.object({
   id: z.string(),
-  name: z.string()
+  name: z.string(),
+  deletionLocked: z.boolean()
+});
+
+/**
+ * Response body schema for admin collection/environment configuration updates.
+ */
+export const adminEntityConfigSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  deletionLocked: z.boolean()
+});
+
+/**
+ * Request body schema for `PUT /admin/collections/:id`.
+ */
+export const updateAdminCollectionBodySchema = z.object({
+  deletionLocked: z.boolean()
+});
+
+/**
+ * Request body schema for `PUT /admin/environments/:id`.
+ */
+export const updateAdminEnvironmentBodySchema = z.object({
+  deletionLocked: z.boolean()
 });
 
 /**

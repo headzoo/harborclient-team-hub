@@ -104,6 +104,11 @@ export interface CollectionSqlRow {
    * Last updating user identifier column.
    */
   updated_by_user_id: string | null;
+
+  /**
+   * Deletion lock column.
+   */
+  deletion_locked: boolean;
 }
 
 /**
@@ -144,6 +149,11 @@ export interface EnvironmentSqlRow {
    * Last updating user identifier column.
    */
   updated_by_user_id: string | null;
+
+  /**
+   * Deletion lock column.
+   */
+  deletion_locked: boolean;
 }
 
 /**
@@ -309,7 +319,8 @@ export function mapCollectionSqlRow(row: CollectionSqlRow): CollectionRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at ?? row.created_at,
     createdByUserId: row.created_by_user_id ?? null,
-    updatedByUserId: row.updated_by_user_id ?? null
+    updatedByUserId: row.updated_by_user_id ?? null,
+    deletionLocked: Boolean(row.deletion_locked)
   };
 }
 
@@ -327,7 +338,8 @@ export function mapEnvironmentSqlRow(row: EnvironmentSqlRow): EnvironmentRecord 
     createdAt: row.created_at,
     updatedAt: row.updated_at ?? row.created_at,
     createdByUserId: row.created_by_user_id ?? null,
-    updatedByUserId: row.updated_by_user_id ?? null
+    updatedByUserId: row.updated_by_user_id ?? null,
+    deletionLocked: Boolean(row.deletion_locked)
   };
 }
 

@@ -19,7 +19,8 @@ const sampleCollection = {
   postRequestScript: '',
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-  ...sampleAttribution
+  ...sampleAttribution,
+  deletionLocked: false
 };
 
 describe('collection routes', () => {
@@ -81,7 +82,7 @@ describe('collection routes', () => {
     await app.close();
   });
 
-  it('returns an empty list for admin users on GET /collections', async () => {
+  it('returns all collections for admin users on GET /collections', async () => {
     const db = createStubDatabase();
     db.listCollections.mockResolvedValue([sampleCollection]);
     const app = await createProtectedTestApp({
@@ -102,7 +103,15 @@ describe('collection routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ collections: [] });
+    expect(response.json()).toEqual({
+      collections: [
+        {
+          ...sampleCollection,
+          createdAt: sampleCollection.createdAt.toISOString(),
+          updatedAt: sampleCollection.updatedAt.toISOString()
+        }
+      ]
+    });
 
     await app.close();
   });
@@ -129,6 +138,57 @@ describe('collection routes', () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({ error: 'Forbidden' });
+
+    await app.close();
+  });
+
+  it('returns 403 when deleting a deletion-locked collection as a user', async () => {
+    const db = createStubDatabase();
+    db.findCollectionById.mockResolvedValue({ ...sampleCollection, deletionLocked: true });
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: {
+        ...sampleUserRecord,
+        collectionAccess: ['collection-1'],
+        environmentAccess: ['env-1']
+      }
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/collections/collection-1',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'Deletion is locked for this collection.' });
+    expect(db.deleteCollection).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('deletes an unlocked collection for an authorized user', async () => {
+    const db = createStubDatabase();
+    db.findCollectionById.mockResolvedValue(sampleCollection);
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: {
+        ...sampleUserRecord,
+        collectionAccess: ['collection-1'],
+        environmentAccess: ['env-1']
+      }
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/collections/collection-1',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(db.deleteCollection).toHaveBeenCalledWith('collection-1', 'user-1');
 
     await app.close();
   });

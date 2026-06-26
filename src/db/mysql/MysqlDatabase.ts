@@ -706,6 +706,60 @@ export class MysqlDatabase implements IDatabase {
   }
 
   /**
+   * Finds a collection by stable identifier.
+   *
+   * @param id - Collection ID to look up.
+   */
+  async findCollectionById(id: string): Promise<CollectionRecord | null> {
+    const rows = await this.queryRows<CollectionSqlRow & RowDataPacket>(
+      `${COLLECTION_SELECT} WHERE id = ?`,
+      [id]
+    );
+    const row = rows[0];
+    return row ? mapCollectionSqlRow(row) : null;
+  }
+
+  /**
+   * Updates whether non-admin users may delete a collection.
+   *
+   * @param id - Collection ID to update.
+   * @param deletionLocked - When true, user-role tokens cannot delete the collection.
+   * @param actingUserId - Admin user performing the update.
+   */
+  async setCollectionDeletionLocked(
+    id: string,
+    deletionLocked: boolean,
+    actingUserId: string
+  ): Promise<CollectionRecord> {
+    const updatedAt = new Date();
+    const result = await this.executeStatement(
+      `UPDATE collections
+      SET deletion_locked = ?,
+        updated_at = ?,
+        updated_by_user_id = ?
+      WHERE id = ?`,
+      [deletionLocked ? 1 : 0, updatedAt, actingUserId, id]
+    );
+
+    if ((result.affectedRows ?? 0) === 0) {
+      throw new Error('Collection not found');
+    }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'collection', id);
+
+    const rows = await this.queryRows<CollectionSqlRow & RowDataPacket>(
+      `${COLLECTION_SELECT} WHERE id = ?`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new Error('Collection not found');
+    }
+
+    return mapCollectionSqlRow(row);
+  }
+
+  /**
    * Lists all environments ordered by name.
    */
   async listEnvironments(): Promise<EnvironmentRecord[]> {
@@ -803,6 +857,60 @@ export class MysqlDatabase implements IDatabase {
   async deleteEnvironment(id: string, actingUserId: string): Promise<void> {
     await this.recordAuditEntry(actingUserId, 'delete', 'environment', id);
     await this.executeStatement('DELETE FROM environments WHERE id = ?', [id]);
+  }
+
+  /**
+   * Finds an environment by stable identifier.
+   *
+   * @param id - Environment ID to look up.
+   */
+  async findEnvironmentById(id: string): Promise<EnvironmentRecord | null> {
+    const rows = await this.queryRows<EnvironmentSqlRow & RowDataPacket>(
+      `${ENVIRONMENT_SELECT} WHERE id = ?`,
+      [id]
+    );
+    const row = rows[0];
+    return row ? mapEnvironmentSqlRow(row) : null;
+  }
+
+  /**
+   * Updates whether non-admin users may delete an environment.
+   *
+   * @param id - Environment ID to update.
+   * @param deletionLocked - When true, user-role tokens cannot delete the environment.
+   * @param actingUserId - Admin user performing the update.
+   */
+  async setEnvironmentDeletionLocked(
+    id: string,
+    deletionLocked: boolean,
+    actingUserId: string
+  ): Promise<EnvironmentRecord> {
+    const updatedAt = new Date();
+    const result = await this.executeStatement(
+      `UPDATE environments
+      SET deletion_locked = ?,
+        updated_at = ?,
+        updated_by_user_id = ?
+      WHERE id = ?`,
+      [deletionLocked ? 1 : 0, updatedAt, actingUserId, id]
+    );
+
+    if ((result.affectedRows ?? 0) === 0) {
+      throw new Error('Environment not found');
+    }
+
+    await this.recordAuditEntry(actingUserId, 'update', 'environment', id);
+
+    const rows = await this.queryRows<EnvironmentSqlRow & RowDataPacket>(
+      `${ENVIRONMENT_SELECT} WHERE id = ?`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new Error('Environment not found');
+    }
+
+    return mapEnvironmentSqlRow(row);
   }
 
   /**

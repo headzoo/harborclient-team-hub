@@ -23,16 +23,17 @@ Every account has a role of either `user` or `admin`. Set the role when creating
 | Role | Purpose | Entity HTTP API | Management HTTP API | API tokens |
 | ---- | ------- | --------------- | ------------------- | ---------- |
 | `user` | HarborClient desktop clients | Scoped — [API Endpoints](./endpoints.md) | No (403) | Yes |
-| `admin` | Operators and automation | List only (`GET /collections` returns `[]`); other entity routes 403 | List/update/delete users; list collections, environments, and LLM models via `/admin/*` | Yes |
+| `admin` | Operators and automation | List on `GET /collections` and `GET /environments`; delete and configure deletion lock via `/admin/*` | List/update/delete users; configure collections and environments via `/admin/*` | Yes |
 
 **`admin` accounts**
 
 - Can receive bearer tokens for REST authentication.
-- May call `GET /collections` (returns an empty list; no scoped entity access).
-- Cannot read or mutate individual collections, environments, folders, or requests (403 on other entity routes).
+- May call `GET /collections` and `GET /environments` (returns the full catalog; no content mutations).
+- Cannot read or mutate individual collection/environment content, folders, or requests (403 on other entity routes).
+- Can delete collections and environments via `DELETE /admin/collections/:id` and `DELETE /admin/environments/:id`, and toggle a per-entity `deletionLocked` flag via `PUT /admin/collections/:id` and `PUT /admin/environments/:id`.
 - Do not use access lists (always stored empty); passing `--collection-access` or `--environment-access` on create or update is rejected.
 - Can list, update, and delete user accounts via `GET`, `PUT`, and `DELETE /admin/users`. Deleting a user permanently removes their API tokens.
-- Can list collection, environment, and hub LLM model metadata via `GET /admin/collections`, `GET /admin/environments`, and `GET /admin/llm/models` when assigning user access lists.
+- Can list collection, environment, and hub LLM model metadata via `GET /admin/collections`, `GET /admin/environments`, and `GET /admin/llm/models` when assigning user access lists. List entries include `deletionLocked`.
 
 **`user` accounts**
 
@@ -42,7 +43,7 @@ Every account has a role of either `user` or `admin`. Set the role when creating
 
 ### Access
 
-Access lists scope what a `user`-role account can see and change on entity routes. Both fields are independent JSON arrays of UUID strings on the user record. Only `user`-role accounts use these fields; `admin` accounts always have `[]` and cannot access entity routes regardless.
+Access lists scope what a `user`-role account can see and change on entity routes. Both fields are independent JSON arrays of UUID strings on the user record. Only `user`-role accounts use these fields; `admin` accounts always have `[]` and cannot mutate entity routes or read nested collection data.
 
 **Wildcard `*`**
 

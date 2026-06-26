@@ -20,6 +20,7 @@ import {
   createAdminUserBodySchema,
   createAdminUserResponseSchema,
   createdApiTokenResponseSchema,
+  adminEntityConfigSchema,
   hubUserRecordSchema,
   listAdminCollectionsResponseSchema,
   listAdminEnvironmentsResponseSchema,
@@ -29,6 +30,8 @@ import {
   reloadConfigResponseSchema,
   serializeApiToken,
   serializeHubUser,
+  updateAdminCollectionBodySchema,
+  updateAdminEnvironmentBodySchema,
   updateAdminUserBodySchema
 } from '#/server/routes/schemas/admin.js';
 import { errorResponseSchema, idParamSchema } from '#/server/routes/schemas/common.js';
@@ -292,7 +295,8 @@ export async function registerAdminRoutes(
         return reply.send({
           collections: collections.map((collection) => ({
             id: collection.id,
-            name: collection.name
+            name: collection.name,
+            deletionLocked: collection.deletionLocked
           }))
         });
       } catch (error) {
@@ -328,8 +332,173 @@ export async function registerAdminRoutes(
         return reply.send({
           environments: environments.map((environment) => ({
             id: environment.id,
-            name: environment.name
+            name: environment.name,
+            deletionLocked: environment.deletionLocked
           }))
+        });
+      } catch (error) {
+        if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'DELETE',
+    url: '/admin/collections/:id',
+    schema: {
+      params: idParamSchema,
+      response: {
+        204: emptyResponseSchema,
+        403: errorResponseSchema,
+        404: errorResponseSchema
+      }
+    },
+    /**
+     * Deletes a collection regardless of deletion lock state.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const collection = await db.findCollectionById(request.params.id);
+        if (!collection) {
+          void reply.code(404).send({ error: 'Collection not found' });
+          return;
+        }
+
+        await db.deleteCollection(request.params.id, user.id);
+        return reply.code(204).send(null);
+      } catch (error) {
+        if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'PUT',
+    url: '/admin/collections/:id',
+    schema: {
+      params: idParamSchema,
+      body: updateAdminCollectionBodySchema,
+      response: {
+        200: adminEntityConfigSchema,
+        403: errorResponseSchema,
+        404: errorResponseSchema
+      }
+    },
+    /**
+     * Updates admin configuration for a collection.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const collection = await db.setCollectionDeletionLocked(
+          request.params.id,
+          request.body.deletionLocked,
+          user.id
+        );
+
+        return reply.send({
+          id: collection.id,
+          name: collection.name,
+          deletionLocked: collection.deletionLocked
+        });
+      } catch (error) {
+        if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'DELETE',
+    url: '/admin/environments/:id',
+    schema: {
+      params: idParamSchema,
+      response: {
+        204: emptyResponseSchema,
+        403: errorResponseSchema,
+        404: errorResponseSchema
+      }
+    },
+    /**
+     * Deletes an environment regardless of deletion lock state.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const environment = await db.findEnvironmentById(request.params.id);
+        if (!environment) {
+          void reply.code(404).send({ error: 'Environment not found' });
+          return;
+        }
+
+        await db.deleteEnvironment(request.params.id, user.id);
+        return reply.code(204).send(null);
+      } catch (error) {
+        if (handleDbError(reply, error)) {
+          return;
+        }
+
+        throw error;
+      }
+    }
+  });
+
+  routes.route({
+    method: 'PUT',
+    url: '/admin/environments/:id',
+    schema: {
+      params: idParamSchema,
+      body: updateAdminEnvironmentBodySchema,
+      response: {
+        200: adminEntityConfigSchema,
+        403: errorResponseSchema,
+        404: errorResponseSchema
+      }
+    },
+    /**
+     * Updates admin configuration for an environment.
+     */
+    handler: async (request, reply) => {
+      try {
+        const user = requireAuthenticatedUser(request);
+        if (denyUnlessAllowed(reply, canUseManagementApi(user))) {
+          return;
+        }
+
+        const environment = await db.setEnvironmentDeletionLocked(
+          request.params.id,
+          request.body.deletionLocked,
+          user.id
+        );
+
+        return reply.send({
+          id: environment.id,
+          name: environment.name,
+          deletionLocked: environment.deletionLocked
         });
       } catch (error) {
         if (handleDbError(reply, error)) {

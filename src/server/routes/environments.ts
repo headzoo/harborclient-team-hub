@@ -4,9 +4,11 @@ import type { IDatabase } from '#/db/IDatabase.js';
 import {
   canAccessEnvironment,
   canCreateEnvironment,
+  canListEnvironments,
   canUseDataApi,
   filterAccessibleEnvironments
 } from '#/server/auth/accessControl.js';
+import { DeletionLockedError } from '#/db/deletionLockedError.js';
 import { handleDbError } from '#/server/routes/errors.js';
 import { denyUnlessAllowed, requireAuthenticatedUser } from '#/server/routes/authorize.js';
 import { errorResponseSchema, idParamSchema } from '#/server/routes/schemas/common.js';
@@ -45,7 +47,7 @@ export async function registerEnvironmentRoutes(
     handler: async (request, reply) => {
       try {
         const user = requireAuthenticatedUser(request);
-        if (denyUnlessAllowed(reply, canUseDataApi(user))) {
+        if (denyUnlessAllowed(reply, canListEnvironments(user))) {
           return;
         }
 
@@ -164,6 +166,16 @@ export async function registerEnvironmentRoutes(
           )
         ) {
           return;
+        }
+
+        const environment = await db.findEnvironmentById(request.params.id);
+        if (!environment) {
+          void reply.code(404).send({ error: 'Environment not found' });
+          return;
+        }
+
+        if (environment.deletionLocked) {
+          throw new DeletionLockedError('environment');
         }
 
         await db.deleteEnvironment(request.params.id, user.id);

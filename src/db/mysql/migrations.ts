@@ -293,6 +293,22 @@ export const MYSQL_DEFAULT_LLM_MODELS_JSON = '[]';
 export const MYSQL_DEFAULT_AUTH_JSON = DEFAULT_AUTH_JSON;
 
 /**
+ * Adds deletion lock columns to collections when upgrading existing databases.
+ */
+export const COLLECTIONS_DELETION_LOCKED_MIGRATION_SQL = `
+ALTER TABLE collections
+  ADD COLUMN IF NOT EXISTS deletion_locked TINYINT(1) NOT NULL DEFAULT 0;
+`.trim();
+
+/**
+ * Adds deletion lock columns to environments when upgrading existing databases.
+ */
+export const ENVIRONMENTS_DELETION_LOCKED_MIGRATION_SQL = `
+ALTER TABLE environments
+  ADD COLUMN IF NOT EXISTS deletion_locked TINYINT(1) NOT NULL DEFAULT 0;
+`.trim();
+
+/**
  * Ordered MySQL migrations applied by {@link MysqlDatabase.migrate}.
  */
 export const MYSQL_MIGRATIONS = [
@@ -315,5 +331,7 @@ export const MYSQL_MIGRATIONS = [
   FOLDERS_BACKFILL_UPDATED_AT_SQL,
   USERS_LLM_MIGRATION_SQL,
   LLM_USAGE_MIGRATION_SQL,
-  LLM_USAGE_LOG_MIGRATION_SQL
+  LLM_USAGE_LOG_MIGRATION_SQL,
+  COLLECTIONS_DELETION_LOCKED_MIGRATION_SQL,
+  ENVIRONMENTS_DELETION_LOCKED_MIGRATION_SQL
 ];

@@ -217,6 +217,28 @@ export interface IDatabase {
   deleteCollection(id: string, actingUserId: string): Promise<void>;
 
   /**
+   * Finds a collection by stable identifier.
+   *
+   * @param id - Collection ID to look up.
+   * @returns Matching collection record, or null when not found.
+   */
+  findCollectionById(id: string): Promise<CollectionRecord | null>;
+
+  /**
+   * Updates whether non-admin users may delete a collection.
+   *
+   * @param id - Collection ID to update.
+   * @param deletionLocked - When true, user-role tokens cannot delete the collection.
+   * @param actingUserId - Admin user performing the update.
+   * @returns Updated collection record.
+   */
+  setCollectionDeletionLocked(
+    id: string,
+    deletionLocked: boolean,
+    actingUserId: string
+  ): Promise<CollectionRecord>;
+
+  /**
    * Lists all environments ordered by name.
    *
    * @returns All environments in the database.
@@ -255,6 +277,28 @@ export interface IDatabase {
    * @param actingUserId - User performing the delete action.
    */
   deleteEnvironment(id: string, actingUserId: string): Promise<void>;
+
+  /**
+   * Finds an environment by stable identifier.
+   *
+   * @param id - Environment ID to look up.
+   * @returns Matching environment record, or null when not found.
+   */
+  findEnvironmentById(id: string): Promise<EnvironmentRecord | null>;
+
+  /**
+   * Updates whether non-admin users may delete an environment.
+   *
+   * @param id - Environment ID to update.
+   * @param deletionLocked - When true, user-role tokens cannot delete the environment.
+   * @param actingUserId - Admin user performing the update.
+   * @returns Updated environment record.
+   */
+  setEnvironmentDeletionLocked(
+    id: string,
+    deletionLocked: boolean,
+    actingUserId: string
+  ): Promise<EnvironmentRecord>;
 
   /**
    * Lists all saved requests in a collection.

@@ -8,6 +8,7 @@ import {
   canUseDataApi,
   filterAccessibleCollections
 } from '#/server/auth/accessControl.js';
+import { DeletionLockedError } from '#/db/deletionLockedError.js';
 import { handleDbError } from '#/server/routes/errors.js';
 import { denyUnlessAllowed, requireAuthenticatedUser } from '#/server/routes/authorize.js';
 import { errorResponseSchema, idParamSchema } from '#/server/routes/schemas/common.js';
@@ -166,6 +167,16 @@ export async function registerCollectionRoutes(app: FastifyInstance, db: IDataba
           )
         ) {
           return;
+        }
+
+        const collection = await db.findCollectionById(request.params.id);
+        if (!collection) {
+          void reply.code(404).send({ error: 'Collection not found' });
+          return;
+        }
+
+        if (collection.deletionLocked) {
+          throw new DeletionLockedError('collection');
         }
 
         await db.deleteCollection(request.params.id, user.id);

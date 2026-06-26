@@ -34,13 +34,24 @@ export function canUseDataApi(user: UserRecord): boolean {
 /**
  * Returns true when the user may list collections via `GET /collections`.
  *
- * Admins receive an empty list (no scoped access) but may call the route so
- * HarborClient can mount a hub configured with an admin token.
+ * Admins receive the full catalog; mutations and nested reads remain blocked.
  *
  * @param user - Authenticated user attached to the request.
  * @returns True for `user`- and `admin`-role accounts.
  */
 export function canListCollections(user: UserRecord): boolean {
+  return canUseDataApi(user) || canUseManagementApi(user);
+}
+
+/**
+ * Returns true when the user may list environments via `GET /environments`.
+ *
+ * Admins receive the full catalog; mutations remain blocked.
+ *
+ * @param user - Authenticated user attached to the request.
+ * @returns True for `user`- and `admin`-role accounts.
+ */
+export function canListEnvironments(user: UserRecord): boolean {
   return canUseDataApi(user) || canUseManagementApi(user);
 }
 
@@ -93,6 +104,32 @@ export function canAccessEnvironment(user: UserRecord, environmentId: string): b
 }
 
 /**
+ * Returns true when the user may delete a specific collection via the data API.
+ *
+ * @param user - Authenticated user attached to the request.
+ * @param collection - Collection record being deleted.
+ * @returns True when the user has access and the collection is not deletion-locked.
+ */
+export function canDeleteCollection(user: UserRecord, collection: CollectionRecord): boolean {
+  return (
+    canUseDataApi(user) && canAccessCollection(user, collection.id) && !collection.deletionLocked
+  );
+}
+
+/**
+ * Returns true when the user may delete a specific environment via the data API.
+ *
+ * @param user - Authenticated user attached to the request.
+ * @param environment - Environment record being deleted.
+ * @returns True when the user has access and the environment is not deletion-locked.
+ */
+export function canDeleteEnvironment(user: UserRecord, environment: EnvironmentRecord): boolean {
+  return (
+    canUseDataApi(user) && canAccessEnvironment(user, environment.id) && !environment.deletionLocked
+  );
+}
+
+/**
  * Returns true when the user may create new collections via the API.
  *
  * @param user - Authenticated user attached to the request.
@@ -123,11 +160,7 @@ export function filterAccessibleCollections(
   user: UserRecord,
   collections: CollectionRecord[]
 ): CollectionRecord[] {
-  if (user.role === 'admin') {
-    return [];
-  }
-
-  if (hasWildcardAccess(user.collectionAccess)) {
+  if (user.role === 'admin' || hasWildcardAccess(user.collectionAccess)) {
     return collections;
   }
 
@@ -146,11 +179,7 @@ export function filterAccessibleEnvironments(
   user: UserRecord,
   environments: EnvironmentRecord[]
 ): EnvironmentRecord[] {
-  if (user.role === 'admin') {
-    return [];
-  }
-
-  if (hasWildcardAccess(user.environmentAccess)) {
+  if (user.role === 'admin' || hasWildcardAccess(user.environmentAccess)) {
     return environments;
   }
 

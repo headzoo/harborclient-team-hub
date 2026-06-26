@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Implement deletion lock feature for collections and environments. (`bbdd197`)
 - Update deployment documentation for Docker installation and user management. (`5ceb95d`)
 - Update deployment documentation and sidebar navigation. (`0d09def`)
 - Add logging configuration support in Docker setup. (`953dcec`)

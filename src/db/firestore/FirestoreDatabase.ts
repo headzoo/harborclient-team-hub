@@ -563,7 +563,8 @@ export class FirestoreDatabase implements IDatabase {
       createdAt: now,
       updatedAt: now,
       createdByUserId: actingUserId,
-      updatedByUserId: actingUserId
+      updatedByUserId: actingUserId,
+      deletionLocked: false
     };
 
     await this.requireClient().collection(COLLECTIONS_COLLECTION).doc(id).set(data);
@@ -651,6 +652,56 @@ export class FirestoreDatabase implements IDatabase {
   }
 
   /**
+   * Finds a collection by stable identifier.
+   *
+   * @param id - Collection ID to look up.
+   */
+  async findCollectionById(id: string): Promise<CollectionRecord | null> {
+    const snapshot = await this.requireClient().collection(COLLECTIONS_COLLECTION).doc(id).get();
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    return mapFirestoreCollection(id, snapshot.data() as FirestoreCollectionDocument);
+  }
+
+  /**
+   * Updates whether non-admin users may delete a collection.
+   *
+   * @param id - Collection ID to update.
+   * @param deletionLocked - When true, user-role tokens cannot delete the collection.
+   * @param actingUserId - Admin user performing the update.
+   */
+  async setCollectionDeletionLocked(
+    id: string,
+    deletionLocked: boolean,
+    actingUserId: string
+  ): Promise<CollectionRecord> {
+    const docRef = this.requireClient().collection(COLLECTIONS_COLLECTION).doc(id);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      throw new Error('Collection not found');
+    }
+
+    const updatedAt = new Date();
+    await docRef.update({
+      deletionLocked,
+      updatedAt,
+      updatedByUserId: actingUserId
+    });
+
+    await this.recordAuditEntry(actingUserId, 'update', 'collection', id);
+
+    const existing = snapshot.data() as FirestoreCollectionDocument;
+    return mapFirestoreCollection(id, {
+      ...existing,
+      deletionLocked,
+      updatedAt,
+      updatedByUserId: actingUserId
+    });
+  }
+
+  /**
    * Lists all environments ordered by name.
    */
   async listEnvironments(): Promise<EnvironmentRecord[]> {
@@ -680,7 +731,8 @@ export class FirestoreDatabase implements IDatabase {
       createdAt: now,
       updatedAt: now,
       createdByUserId: actingUserId,
-      updatedByUserId: actingUserId
+      updatedByUserId: actingUserId,
+      deletionLocked: false
     };
 
     await this.requireClient().collection(ENVIRONMENTS_COLLECTION).doc(id).set(data);
@@ -736,6 +788,56 @@ export class FirestoreDatabase implements IDatabase {
   async deleteEnvironment(id: string, actingUserId: string): Promise<void> {
     await this.recordAuditEntry(actingUserId, 'delete', 'environment', id);
     await this.requireClient().collection(ENVIRONMENTS_COLLECTION).doc(id).delete();
+  }
+
+  /**
+   * Finds an environment by stable identifier.
+   *
+   * @param id - Environment ID to look up.
+   */
+  async findEnvironmentById(id: string): Promise<EnvironmentRecord | null> {
+    const snapshot = await this.requireClient().collection(ENVIRONMENTS_COLLECTION).doc(id).get();
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    return mapFirestoreEnvironment(id, snapshot.data() as FirestoreEnvironmentDocument);
+  }
+
+  /**
+   * Updates whether non-admin users may delete an environment.
+   *
+   * @param id - Environment ID to update.
+   * @param deletionLocked - When true, user-role tokens cannot delete the environment.
+   * @param actingUserId - Admin user performing the update.
+   */
+  async setEnvironmentDeletionLocked(
+    id: string,
+    deletionLocked: boolean,
+    actingUserId: string
+  ): Promise<EnvironmentRecord> {
+    const docRef = this.requireClient().collection(ENVIRONMENTS_COLLECTION).doc(id);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      throw new Error('Environment not found');
+    }
+
+    const updatedAt = new Date();
+    await docRef.update({
+      deletionLocked,
+      updatedAt,
+      updatedByUserId: actingUserId
+    });
+
+    await this.recordAuditEntry(actingUserId, 'update', 'environment', id);
+
+    const existing = snapshot.data() as FirestoreEnvironmentDocument;
+    return mapFirestoreEnvironment(id, {
+      ...existing,
+      deletionLocked,
+      updatedAt,
+      updatedByUserId: actingUserId
+    });
   }
 
   /**

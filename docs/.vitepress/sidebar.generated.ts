@@ -177,14 +177,6 @@ export const sidebar: DefaultTheme.SidebarItem[] =
             "link": "/deploy#how-to-invoke-the-cli"
           },
           {
-            "text": "Running commands from your host",
-            "link": "/deploy#running-commands-from-your-host"
-          },
-          {
-            "text": "Running commands inside the container",
-            "link": "/deploy#running-commands-inside-the-container"
-          },
-          {
             "text": "Reload config without restarting",
             "link": "/deploy#reload-config-without-restarting"
           },

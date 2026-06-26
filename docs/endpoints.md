@@ -355,13 +355,15 @@ curl -s -X DELETE http://127.0.0.1:8788/admin/tokens/770e8400-e29b-41d4-a716-446
 
 ### GET /admin/collections
 
-Lists all collections as lightweight `{ id, name }` records for operator user management.
+Lists all collections as lightweight `{ id, name, deletionLocked }` records for operator user management.
 
 **Response `200`:**
 
 ```json
 {
-  "collections": [{ "id": "550e8400-e29b-41d4-a716-446655440000", "name": "Shared API" }]
+  "collections": [
+    { "id": "550e8400-e29b-41d4-a716-446655440000", "name": "Shared API", "deletionLocked": false }
+  ]
 }
 ```
 
@@ -372,15 +374,51 @@ curl -s http://127.0.0.1:8788/admin/collections \
   -H "Authorization: Bearer hbk_your_admin_token_here"
 ```
 
-### GET /admin/environments
+### PUT /admin/collections/:id
 
-Lists all environments as lightweight `{ id, name }` records for operator user management.
+Updates admin configuration for a collection. Currently supports toggling `deletionLocked` to prevent non-admin users from deleting the collection.
+
+**Request body:**
+
+```json
+{ "deletionLocked": true }
+```
 
 **Response `200`:**
 
 ```json
 {
-  "environments": [{ "id": "660e8400-e29b-41d4-a716-446655440001", "name": "Production" }]
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Shared API",
+  "deletionLocked": true
+}
+```
+
+**Response `403`:** Authenticated `user`-role token.
+
+**Response `404`:** Unknown collection id.
+
+### DELETE /admin/collections/:id
+
+Deletes a collection and all nested folders and requests. Admins may delete regardless of `deletionLocked`.
+
+**Response `204`:** Collection deleted.
+
+**Response `403`:** Authenticated `user`-role token.
+
+**Response `404`:** Unknown collection id.
+
+### GET /admin/environments
+
+Lists all environments as lightweight `{ id, name, deletionLocked }` records for operator user management.
+
+**Response `200`:**
+
+```json
+{
+  "environments": [
+    { "id": "660e8400-e29b-41d4-a716-446655440001", "name": "Production", "deletionLocked": false }
+  ]
 }
 ```
 
@@ -390,6 +428,40 @@ Lists all environments as lightweight `{ id, name }` records for operator user m
 curl -s http://127.0.0.1:8788/admin/environments \
   -H "Authorization: Bearer hbk_your_admin_token_here"
 ```
+
+### PUT /admin/environments/:id
+
+Updates admin configuration for an environment. Currently supports toggling `deletionLocked` to prevent non-admin users from deleting the environment.
+
+**Request body:**
+
+```json
+{ "deletionLocked": true }
+```
+
+**Response `200`:**
+
+```json
+{
+  "id": "660e8400-e29b-41d4-a716-446655440001",
+  "name": "Production",
+  "deletionLocked": true
+}
+```
+
+**Response `403`:** Authenticated `user`-role token.
+
+**Response `404`:** Unknown environment id.
+
+### DELETE /admin/environments/:id
+
+Deletes an environment. Admins may delete regardless of `deletionLocked`.
+
+**Response `204`:** Environment deleted.
+
+**Response `403`:** Authenticated `user`-role token.
+
+**Response `404`:** Unknown environment id.
 
 ### GET /admin/llm/models
 
@@ -462,7 +534,7 @@ Collections are top-level workspaces that hold folders, saved requests, and coll
 
 ### GET /collections
 
-Lists all collections ordered by name. Results are filtered by the authenticated user's collection access list. `admin`-role tokens receive an empty list (no scoped access) but may call this route so HarborClient can mount a hub configured with an admin token.
+Lists all collections ordered by name. Results are filtered by the authenticated user's collection access list. `admin`-role tokens receive the full catalog but cannot mutate collections or read nested folders and requests.
 
 **Auth:** Bearer token required.
 
@@ -537,6 +609,8 @@ Deletes a collection and all nested folders and saved requests.
 
 **Response `204`:** No content.
 
+**Response `403`:** Collection has `deletionLocked: true` (message: `Deletion is locked for this collection.`).
+
 **Response `404`:** Collection not found.
 
 ## Environments
@@ -550,13 +624,14 @@ Environments hold named variable sets used across requests.
   "id": "550e8400-e29b-41d4-a716-446655440001",
   "name": "Production",
   "variables": [],
-  "createdAt": "2026-01-01T00:00:00.000Z"
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "deletionLocked": false
 }
 ```
 
 ### GET /environments
 
-Lists all environments ordered by name.
+Lists all environments ordered by name. Results are filtered by the authenticated user's environment access list. `admin`-role tokens receive the full catalog but cannot mutate environments.
 
 **Auth:** Bearer token required.
 
@@ -629,9 +704,9 @@ Deletes an environment by id.
 
 **Response `204`:** No content.
 
-**Response `404`:** Environment not found.
+**Response `403`:** Environment has `deletionLocked: true` (message: `Deletion is locked for this environment.`).
 
-## Folders
+**Response `404`:** Environment not found.
 
 Folders organize saved requests within a collection.
 

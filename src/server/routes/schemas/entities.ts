@@ -28,7 +28,8 @@ export const collectionRecordSchema = z.object({
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
   createdByUserId: z.string().nullable(),
-  updatedByUserId: z.string().nullable()
+  updatedByUserId: z.string().nullable(),
+  deletionLocked: z.boolean()
 });
 
 /**
@@ -41,7 +42,8 @@ export const environmentRecordSchema = z.object({
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
   createdByUserId: z.string().nullable(),
-  updatedByUserId: z.string().nullable()
+  updatedByUserId: z.string().nullable(),
+  deletionLocked: z.boolean()
 });
 
 /**

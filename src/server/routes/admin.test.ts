@@ -26,7 +26,8 @@ const sampleCollection = {
   postRequestScript: '',
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-  ...sampleAttribution
+  ...sampleAttribution,
+  deletionLocked: false
 };
 
 const sampleEnvironment = {
@@ -35,7 +36,8 @@ const sampleEnvironment = {
   variables: [],
   createdAt: new Date('2026-01-02T00:00:00.000Z'),
   updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-  ...sampleAttribution
+  ...sampleAttribution,
+  deletionLocked: false
 };
 
 /**
@@ -1066,7 +1068,7 @@ describe('GET /admin/collections', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      collections: [{ id: 'collection-1', name: 'Shared API' }]
+      collections: [{ id: 'collection-1', name: 'Shared API', deletionLocked: false }]
     });
 
     await app.close();
@@ -1118,7 +1120,7 @@ describe('GET /admin/environments', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      environments: [{ id: 'env-1', name: 'Production' }]
+      environments: [{ id: 'env-1', name: 'Production', deletionLocked: false }]
     });
 
     await app.close();
@@ -1140,6 +1142,151 @@ describe('GET /admin/environments', () => {
 
     expect(response.statusCode).toBe(403);
     expect(db.listEnvironments).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+});
+
+describe('admin collection configuration', () => {
+  const adminUser = {
+    ...sampleUserRecord,
+    id: 'admin-1',
+    role: 'admin' as const,
+    collectionAccess: [],
+    environmentAccess: []
+  };
+
+  it('deletes a collection for admin-role tokens', async () => {
+    const db = createStubDatabase();
+    db.findCollectionById.mockResolvedValue({ ...sampleCollection, deletionLocked: true });
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/admin/collections/collection-1',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(db.deleteCollection).toHaveBeenCalledWith('collection-1', 'admin-1');
+
+    await app.close();
+  });
+
+  it('updates collection deletion lock for admin-role tokens', async () => {
+    const db = createStubDatabase();
+    db.setCollectionDeletionLocked.mockResolvedValue({ ...sampleCollection, deletionLocked: true });
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/collections/collection-1',
+      headers: authHeader(),
+      payload: { deletionLocked: true }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      id: 'collection-1',
+      name: 'Shared API',
+      deletionLocked: true
+    });
+    expect(db.setCollectionDeletionLocked).toHaveBeenCalledWith('collection-1', true, 'admin-1');
+
+    await app.close();
+  });
+
+  it('returns 403 for user-role tokens on admin collection routes', async () => {
+    const db = createStubDatabase();
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: sampleUserRecord
+    });
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: '/admin/collections/collection-1',
+      headers: authHeader()
+    });
+    const updateResponse = await app.inject({
+      method: 'PUT',
+      url: '/admin/collections/collection-1',
+      headers: authHeader(),
+      payload: { deletionLocked: true }
+    });
+
+    expect(deleteResponse.statusCode).toBe(403);
+    expect(updateResponse.statusCode).toBe(403);
+
+    await app.close();
+  });
+});
+
+describe('admin environment configuration', () => {
+  const adminUser = {
+    ...sampleUserRecord,
+    id: 'admin-1',
+    role: 'admin' as const,
+    collectionAccess: [],
+    environmentAccess: []
+  };
+
+  it('deletes an environment for admin-role tokens', async () => {
+    const db = createStubDatabase();
+    db.findEnvironmentById.mockResolvedValue({ ...sampleEnvironment, deletionLocked: true });
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/admin/environments/env-1',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(db.deleteEnvironment).toHaveBeenCalledWith('env-1', 'admin-1');
+
+    await app.close();
+  });
+
+  it('updates environment deletion lock for admin-role tokens', async () => {
+    const db = createStubDatabase();
+    db.setEnvironmentDeletionLocked.mockResolvedValue({
+      ...sampleEnvironment,
+      deletionLocked: true
+    });
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: adminUser
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/environments/env-1',
+      headers: authHeader(),
+      payload: { deletionLocked: true }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      id: 'env-1',
+      name: 'Production',
+      deletionLocked: true
+    });
+    expect(db.setEnvironmentDeletionLocked).toHaveBeenCalledWith('env-1', true, 'admin-1');
 
     await app.close();
   });

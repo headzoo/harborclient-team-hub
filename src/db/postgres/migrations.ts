@@ -269,6 +269,22 @@ CREATE INDEX IF NOT EXISTS llm_usage_log_period_idx ON llm_usage_log (period);
 `.trim();
 
 /**
+ * Adds deletion lock columns to collections when upgrading existing databases.
+ */
+export const COLLECTIONS_DELETION_LOCKED_MIGRATION_SQL = `
+ALTER TABLE collections
+  ADD COLUMN IF NOT EXISTS deletion_locked BOOLEAN NOT NULL DEFAULT FALSE;
+`.trim();
+
+/**
+ * Adds deletion lock columns to environments when upgrading existing databases.
+ */
+export const ENVIRONMENTS_DELETION_LOCKED_MIGRATION_SQL = `
+ALTER TABLE environments
+  ADD COLUMN IF NOT EXISTS deletion_locked BOOLEAN NOT NULL DEFAULT FALSE;
+`.trim();
+
+/**
  * Ordered Postgres migrations applied by {@link PostgresDatabase.migrate}.
  */
 export const POSTGRES_MIGRATIONS = [
@@ -291,5 +307,7 @@ export const POSTGRES_MIGRATIONS = [
   FOLDERS_BACKFILL_UPDATED_AT_SQL,
   USERS_LLM_MIGRATION_SQL,
   LLM_USAGE_MIGRATION_SQL,
-  LLM_USAGE_LOG_MIGRATION_SQL
+  LLM_USAGE_LOG_MIGRATION_SQL,
+  COLLECTIONS_DELETION_LOCKED_MIGRATION_SQL,
+  ENVIRONMENTS_DELETION_LOCKED_MIGRATION_SQL
 ];

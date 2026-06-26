@@ -140,12 +140,12 @@ export const USER_SELECT_COLUMNS = `id, name, role, collection_access, environme
 /**
  * Column list for SELECT queries against the collections table.
  */
-export const COLLECTION_SELECT_COLUMNS = `id, name, variables, headers, auth, pre_request_script, post_request_script, created_at, updated_at, created_by_user_id, updated_by_user_id`;
+export const COLLECTION_SELECT_COLUMNS = `id, name, variables, headers, auth, pre_request_script, post_request_script, created_at, updated_at, created_by_user_id, updated_by_user_id, deletion_locked`;
 
 /**
  * Column list for SELECT queries against the environments table.
  */
-export const ENVIRONMENT_SELECT_COLUMNS = `id, name, variables, created_at, updated_at, created_by_user_id, updated_by_user_id`;
+export const ENVIRONMENT_SELECT_COLUMNS = `id, name, variables, created_at, updated_at, created_by_user_id, updated_by_user_id, deletion_locked`;
 
 /**
  * Column list for SELECT queries against the folders table.

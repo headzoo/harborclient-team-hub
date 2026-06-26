@@ -498,36 +498,29 @@ docker exec CONTAINER cat /etc/team-hub/server.yaml
 
 ### How to invoke the CLI
 
-The `team-hub` binary is not on `PATH` in the image. Run the built CLI with Node from `/app`:
+The `team-hub` binary is not on `PATH` in the image. From your host, run the built CLI inside the container with `docker exec` (replace `CONTAINER` with the container name or id from `docker ps`):
+
+```bash
+docker exec -it CONTAINER \
+  node /app/dist/cli.js -c /etc/team-hub/server.yaml <subcommand> [options]
+```
+
+Example:
+
+```bash
+docker exec -it team-hub \
+  node /app/dist/cli.js -c /etc/team-hub/server.yaml user list
+```
+
+Omit `-it` for non-interactive one-shot commands (scripts, CI).
+
+If you open a shell inside the container (`docker exec -it CONTAINER bash`), run the same Node command directly:
 
 ```bash
 node /app/dist/cli.js -c /etc/team-hub/server.yaml <subcommand> [options]
 ```
 
-**Put global flags before the subcommand.** `-c` is a root-level option, not a subcommand option:
-
-```bash
-# Correct
-node /app/dist/cli.js -c /etc/team-hub/server.yaml user list
-
-# Wrong — "unknown option '-c'"
-node /app/dist/cli.js user list -c /etc/team-hub/server.yaml
-```
-
-### Running commands from your host
-
-Prefer one-shot `docker exec` from your machine (no interactive shell required):
-
-```bash
-docker exec -it CONTAINER \
-  node /app/dist/cli.js -c /etc/team-hub/server.yaml user list
-```
-
-Replace `CONTAINER` with the container name or id from `docker ps`.
-
-### Running commands inside the container
-
-If you open a shell with `docker exec -it CONTAINER bash`, change to `/app` first:
+Or change to `/app` and use a relative path:
 
 ```bash
 cd /app
@@ -539,6 +532,18 @@ Optional alias for an interactive session:
 ```bash
 alias team-hub='node /app/dist/cli.js -c /etc/team-hub/server.yaml'
 team-hub user list
+```
+
+**Put global flags before the subcommand.** `-c` is a root-level option, not a subcommand option:
+
+```bash
+# Correct
+docker exec -it CONTAINER \
+  node /app/dist/cli.js -c /etc/team-hub/server.yaml user list
+
+# Wrong — "unknown option '-c'"
+docker exec -it CONTAINER \
+  node /app/dist/cli.js user list -c /etc/team-hub/server.yaml
 ```
 
 See [CLI](./cli.md) for all subcommands and options.
