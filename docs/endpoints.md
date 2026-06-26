@@ -603,13 +603,13 @@ Updates a collection's name, variables, headers, scripts, and auth defaults.
 
 ### DELETE /collections/:id
 
-Deletes a collection and all nested folders and saved requests.
+Deletes a collection and all nested folders and saved requests. Only the user who created the collection may delete it via this route.
 
 **Auth:** Bearer token required.
 
 **Response `204`:** No content.
 
-**Response `403`:** Collection has `deletionLocked: true` (message: `Deletion is locked for this collection.`).
+**Response `403`:** Collection has `deletionLocked: true` (message: `Deletion is locked for this collection.`), or the authenticated user did not create the collection (`{ "error": "Forbidden" }`).
 
 **Response `404`:** Collection not found.
 

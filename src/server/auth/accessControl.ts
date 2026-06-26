@@ -108,11 +108,14 @@ export function canAccessEnvironment(user: UserRecord, environmentId: string): b
  *
  * @param user - Authenticated user attached to the request.
  * @param collection - Collection record being deleted.
- * @returns True when the user has access and the collection is not deletion-locked.
+ * @returns True when the user created the collection, has access, and deletion is not locked.
  */
 export function canDeleteCollection(user: UserRecord, collection: CollectionRecord): boolean {
   return (
-    canUseDataApi(user) && canAccessCollection(user, collection.id) && !collection.deletionLocked
+    canUseDataApi(user) &&
+    canAccessCollection(user, collection.id) &&
+    collection.createdByUserId === user.id &&
+    !collection.deletionLocked
   );
 }
 

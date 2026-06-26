@@ -168,6 +168,61 @@ describe('collection routes', () => {
     await app.close();
   });
 
+  it('returns 403 when deleting a collection created by another user', async () => {
+    const db = createStubDatabase();
+    db.findCollectionById.mockResolvedValue({
+      ...sampleCollection,
+      createdByUserId: 'other-user'
+    });
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: {
+        ...sampleUserRecord,
+        collectionAccess: ['collection-1'],
+        environmentAccess: ['env-1']
+      }
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/collections/collection-1',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'Forbidden' });
+    expect(db.deleteCollection).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('returns 403 when deleting a collection with no creator attribution', async () => {
+    const db = createStubDatabase();
+    db.findCollectionById.mockResolvedValue({ ...sampleCollection, createdByUserId: null });
+    const app = await createProtectedTestApp({
+      db,
+      withValidAuth: true,
+      user: {
+        ...sampleUserRecord,
+        collectionAccess: ['collection-1'],
+        environmentAccess: ['env-1']
+      }
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/collections/collection-1',
+      headers: authHeader()
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'Forbidden' });
+    expect(db.deleteCollection).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it('deletes an unlocked collection for an authorized user', async () => {
     const db = createStubDatabase();
     db.findCollectionById.mockResolvedValue(sampleCollection);

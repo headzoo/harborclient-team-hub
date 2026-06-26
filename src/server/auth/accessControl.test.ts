@@ -61,7 +61,7 @@ const sampleCollections: CollectionRecord[] = [
     postRequestScript: '',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    createdByUserId: null,
+    createdByUserId: 'user-1',
     updatedByUserId: null,
     deletionLocked: false
   },
@@ -146,6 +146,12 @@ describe('accessControl', () => {
       false
     );
     expect(canDeleteCollection(adminUser, sampleCollections[0])).toBe(false);
+    expect(
+      canDeleteCollection(baseUser, { ...sampleCollections[0], createdByUserId: 'other-user' })
+    ).toBe(false);
+    expect(canDeleteCollection(baseUser, { ...sampleCollections[0], createdByUserId: null })).toBe(
+      false
+    );
     expect(canDeleteEnvironment(baseUser, sampleEnvironments[0])).toBe(true);
     expect(canDeleteEnvironment(baseUser, { ...sampleEnvironments[0], deletionLocked: true })).toBe(
       false

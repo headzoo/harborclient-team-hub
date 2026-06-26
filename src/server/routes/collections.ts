@@ -4,6 +4,7 @@ import type { IDatabase } from '#/db/IDatabase.js';
 import {
   canAccessCollection,
   canCreateCollection,
+  canDeleteCollection,
   canListCollections,
   canUseDataApi,
   filterAccessibleCollections
@@ -160,15 +161,6 @@ export async function registerCollectionRoutes(app: FastifyInstance, db: IDataba
     handler: async (request, reply) => {
       try {
         const user = requireAuthenticatedUser(request);
-        if (
-          denyUnlessAllowed(
-            reply,
-            canUseDataApi(user) && canAccessCollection(user, request.params.id)
-          )
-        ) {
-          return;
-        }
-
         const collection = await db.findCollectionById(request.params.id);
         if (!collection) {
           void reply.code(404).send({ error: 'Collection not found' });
@@ -177,6 +169,10 @@ export async function registerCollectionRoutes(app: FastifyInstance, db: IDataba
 
         if (collection.deletionLocked) {
           throw new DeletionLockedError('collection');
+        }
+
+        if (denyUnlessAllowed(reply, canDeleteCollection(user, collection))) {
+          return;
         }
 
         await db.deleteCollection(request.params.id, user.id);

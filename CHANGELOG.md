@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Enhance collection deletion logic and access control. (`15a4c54`)
 - Include deletion_locked in PostgresDatabase collection test mock row.. (`96c4641`)
 - Preserve Docker server.yaml across container restarts.. (`d457773`)
 
